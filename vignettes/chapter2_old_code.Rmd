@@ -1,0 +1,1769 @@
+---
+title: "chapter2_old_code"
+author: "Daniel R. Kick"
+date: "May 30, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Discussion
+
+
+Figure Legends
+Figure 1: Connectivity and manipulation of the cardiac ganglion
+See accompanying figure
+
+Displacing saline by the small cells silences the LCs without surgically altering the ganglia. Intracellular voltage of LC 4 and LC5 were manipulated to be desynchronized, have far more depolarization than normal, or both. 
+
+Figure 2: Desynchronization attenuates coupling resistance
+See accompanying figure
+
+Coupling resistance decreases with desynchronization between intracellular deflections but not with increased depolarization. This effect is sufficiently large to manifest an increase in coupling coefficient as well.
+
+Table 1 Holm-Sidak Adjusted Empirical P Values
+	Time	Phase	Amp	Time:Phase	Time:Amp	Phase:Amp
+Rin1	1	0.8607	1	0.156	0.1855	0.2832
+Rmem1	1	1	1	0.4212	0.7396	0.448
+CC12	0.16	0.0006	0.1254	0.0035	0.3509	0.0468
+Rc	0.0315	0.0042	0.0681	0.3798	0.9119	0.0315
+
+Note: Empirical p-values significant (?? = 0.05) following holm-sidak correction are italicized and in bold face. 
+
+
+
+
+
+
+
+
+
+
+
+## Method Validation ==========================================================
+### How are Input Resistance and Membrane Resistance Related?
+```{r}
+# GET EQUATION AND R-SQUARED AS STRING
+# SOURCE: http://goo.gl/K4yh
+
+# Slightly modified to accept the formula statement
+lm_eqn <- function(m = lm(y ~ x, df)){
+
+    eq <- substitute(italic(y) == a + b %.% italic(x)*","~~italic(r)^2~"="~r2, 
+         list(a = format(coef(m)[1], digits = 2), 
+              b = format(coef(m)[2], digits = 2), 
+             r2 = format(summary(m)$r.squared, digits = 3)))
+    as.character(as.expression(eq));                 
+}
+
+#' Get Linear Model Equation
+#'
+#'@title Get Linear Model Equation
+#'
+#'@param m
+#'
+#'@return
+#'
+#'@author Daniel Kick (\email{daniel.r.kick@@protonmail.com})
+#'
+#'@references Helpful Stack Overflow thread \url{https://stackoverflow.com/questions/7549694/adding-regression-line-equation-and-r2-on-graph}
+#'
+#'@export
+#'
+
+lm_eqn <- function(m = lm(y ~ x, df)){
+  #m <- lm(y ~ x, df);
+  eq <- substitute(italic(y) == a + b %.% italic(x)*","~~italic(r)^2~"="~r2,
+                   list(a = format(coef(m)[1], digits = 2),
+                        b = format(coef(m)[2], digits = 2),
+                        r2 = format(summary(m)$r.squared, digits = 3)))
+  as.character(as.expression(eq));
+}
+```
+
+```{r}
+ggplot(M[M$`Time` == 0, ], aes(x = r11, y = r1))+
+  geom_abline(intercept = 0, slope = 1, linetype = "dotted")+
+  geom_point(aes(color = Condition))+
+  geom_smooth(method = lm, se = FALSE, linetype = "dashed")+
+  labs(x = "Input Resistance",  y = "Membrane Resistance")+
+  theme(legend.position = "bottom")+
+  geom_text(x = 5, y = 1, label = lm_eqn(m = lm(r1 ~ r11, data = M[M$`Time` == 0, ]) ), parse = F)+ # This line is causing causing the graph to not render when parse is T
+  labs(title = "Membrane Resistance vs Input Resistance: All Data")+
+  coord_cartesian(xlim = c(0, 10), ylim = c(0, 10))
+```
+
+### How much overlap is there between the input resistances of each group?
+```{r}
+cowplot::plot_grid(
+  plotlist = list(
+    ggplot(M[M$`Time` == 0,], aes(
+      x = Condition, y = r11, color = Condition
+    )) +
+      # geom_boxplot()+
+      geom_jitter(width = 0.1) +
+      # ggbeeswarm::geom_beeswarm(width = 0.1)+
+      theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+      theme(legend.position = "") +
+      labs(title = "Input Resistance By Group"),
+    
+    ggplot(M[M$`Time` == 0,], aes(
+      x = `r11`, y = Condition, fill = Condition
+    )) +
+      ggridges::geom_density_ridges(alpha = 0.8) +
+      #geom_histogram(data=subset(M, Condition == '') , bins = 10)+
+      labs(title = "Overlap in Input Resistance Across groups")
+  )
+)
+```
+
+
+Membrane resistance across conditions
+```{r}
+ggplot(M[M$`Time` == 0 & M$r1 > 0, ], aes(x = Condition, y = r1, color = Condition))+
+  geom_jitter(width = 0.1)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  theme(legend.position = "")+
+  labs(title = "Membrane Resistance By Group")
+```
+
+### Transfer resistance across conditions
+```{r}
+ggplot(M[M$`Time` == 0, ], aes(x = Condition, y = r12, color = Condition))+
+  geom_jitter(width = 0.1)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  theme(legend.position = "")+
+  labs(title = "Transfer Resistance By Group")
+
+
+```
+
+### Coupling coefficient across conditions
+```{r}
+ggplot(M[M$`Time` == 0, ], aes(x = Condition, y = cc, color = Condition))+
+  geom_jitter(width = 0.1)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  theme(legend.position = "")+
+  labs(title = "Coupling Coefficient By Group")
+
+
+```
+
+### Coupling resistance across conditions
+```{r}
+ggplot(M[M$`Time` == 0 & M$rc>0, ], aes(x = Condition, y = rc, color = Condition))+
+  geom_jitter(width = 0.1)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  theme(legend.position = "")+
+  labs(title = "Coupling Resistance By Group")
+
+
+```
+
+### Is input resistance of one LC predictive of the other's?
+```{r}
+rect <- M[M$`Time` == 0, c("Experiment", "Inj_Cell", "Condition", "r11","r12","r1","rc","cc")]
+inj.lc5 <- rect[rect$Inj_Cell == "LC5",]
+inj.lc4 <- rect[rect$Inj_Cell == "LC4",]
+names(inj.lc5) <- c("Experiment","Inj_Cell","Condition",
+                    "LC5.r11","LC5->LC4.r12","LC5.r1",
+                    "LC5->LC4.rc","LC5->LC4.Coupling Coefficient")
+names(inj.lc4) <- c("Experiment","Inj_Cell","Condition",
+                    "LC4.r11","LC4->LC5.r12","LC4.r1",
+                    "LC4->LC5.rc","LC4->LC5.Coupling Coefficient")
+#rect <- cbind(inj.lc4, inj.lc5)
+
+rect <- dplyr::full_join(inj.lc4[, !names(inj.lc4) %in% c("Inj_Cell")], inj.lc5[, !names(inj.lc5) %in% c("Inj_Cell")])
+```
+
+```{r}
+ggplot(rect, aes(x = LC4.r11, y = LC5.r11))+
+  geom_abline(slope = 1, intercept = 0, linetype = 2)+
+  geom_smooth(method = lm, linetype = 2)+
+  geom_point(aes(color = Condition))+
+  ylim(0,8)+
+  xlim(0,8)+
+  geom_text(x = 4, y = 0, label = lm_eqn(m = lm(LC5.r11 ~ LC4.r11, data = rect)
+  ), parse = TRUE)+
+  labs(title = "LC5 Input Resistance by LC4 Input Resistance")+
+  theme(legend.position = "")
+
+
+```
+
+### Is there directionality in membrane resistance?
+```{r}
+ggplot(rect, aes(x = LC4.r1, y = LC5.r1))+
+  geom_point(aes(color = Condition))+
+  geom_abline(slope = 1, intercept = 0, linetype = 2)+
+  geom_smooth(method = lm, linetype = 2)+
+  ylim(0,15)+
+  xlim(0,15)+
+  geom_text(x = 7.5, y = 0, label = lm_eqn(m = lm(LC5.r1 ~ LC4.r1, data = rect)
+  ), parse = TRUE)+
+  labs(title = "LC5 Membrane Resistance by LC4 Membrane Resistance")+
+  theme(legend.position = "")
+
+```
+
+### Is there directionality in transfer resistance?
+```{r}
+#TODO: This formula is failing. No estimate for slope due to NAs?
+
+ggplot(rect, aes(x = `LC4->LC5.r12`, y = `LC5->LC4.r12`))+
+  geom_point(aes(color = Condition))+
+  geom_abline(slope = 1, intercept = 0, linetype = 2)+
+  geom_smooth(method = lm, linetype = 2)+
+  ylim(0,7)+
+  xlim(0,7)+
+  geom_text(x = 3.5, y = 0, label = lm_eqn(m = lm(rect$`LC5->LC4.r12` ~ rect$`LC5->LC4.r12`)
+  #                                         lm(`LC5->LC4.r12`~`LC4->LC5.r12`, data = rect)
+  ), parse = TRUE)+
+  labs(title = "LC4->LC5 Transfer Resistance by \nLC5->LC4 Transfer Resistance")+
+  theme(legend.position = "")
+
+
+```
+
+### Is there directionality in coupling resistance?
+```{r}
+ggplot(rect, aes(x = `LC4->LC5.rc`, y = `LC5->LC4.rc`))+
+  geom_point(aes(color = Condition))+
+  geom_abline(slope = 1, intercept = 0, linetype = 2)+
+  geom_smooth(method = lm, linetype = 2)+
+  ylim(0,11)+
+  xlim(0,11)+
+  #geom_text(x = 5.5, y = 0, label = lm_eqn(m = lm(`LC5->LC4.rc`~`LC4->LC5.rc`, data = rect)
+  #), parse = TRUE)+
+  labs(title = "LC4->LC5 Coupling Resistance by \nLC5->LC4 Coupling Resistance")+
+  theme(legend.position = "")
+
+```
+
+### Is there directionality in coupling coefficient?
+```{r}
+ggplot(rect, aes(x = `LC4->LC5.Coupling Coefficient`, y = `LC5->LC4.Coupling Coefficient`))+
+  geom_point(aes(color = Condition))+
+  geom_abline(slope = 1, intercept = 0, linetype = 2)+
+  geom_smooth(method = lm, linetype = 2)+
+  ylim(0,1)+
+  xlim(0,1)+
+  #geom_text(x = 0.5, y = 0, label = lm_eqn(m = lm(`LC5->LC4.Coupling Coefficient`~`LC4->LC5.Coupling Coefficient`, data = rect)
+  #), parse = TRUE)+
+  labs(title = "LC4->LC5 Coupling Coefficient \nby LC5->LC4 Coupling Coefficient")+
+  theme(legend.position = "")
+
+```
+
+
+# Results
+
+## Effects of Depolarization and Asynchrony on Coupling
+```{r Prepare 2x2 Exp Data}
+df <- M[M$Condition %in% c("PS.0", "PS.22", "PS.0.High.Amp", "PS.22.High.Amp"), ]
+df.gj <- M.gj[M.gj$Condition %in% c("PS.0", "PS.22", "PS.0.High.Amp", "PS.22.High.Amp"), ]
+
+prep_2x2 <- function(input.df = df){
+  input.df$Synchrony <- ifelse(input.df$Condition %in% c("PS.0", "PS.0.High.Amp"), "Synchronous", "Asynchronous")
+  input.df$Stimulation <- ifelse(input.df$Condition %in% c("PS.0", "PS.22"), "Control", "Artificial")
+  
+  input.df$Synchrony <- factor(input.df$Synchrony, levels = c("Synchronous", "Asynchronous"))
+  input.df$Stimulation <- factor(input.df$Stimulation, levels = c("Control", "Artificial"))  
+  
+  return(input.df)
+}
+
+df <- prep_2x2(df)
+df.gj <- prep_2x2(df.gj)
+```
+
+Make sure there are no time points beyond our target range.
+```{r}
+df <- df[df$Time <61, ]
+
+df.gj <- df.gj[df.gj$Time <61, ]
+```
+
+
+
+
+### Effect of Treatments on Coupling Coefficient
+```{r cc plots1}
+plot_all_time_pts <- function(temp = input.df,
+                              predictor = "Time",
+                              response = "cc",
+                              YLIM = c(0,1),
+                              TITLE = "Coupling Coefficient Over Time",
+                              XLAB = "Time in Minutes",
+                              YLAB = "Coupling Coefficient",
+                              USE.COLOR = "Firebrick") {
+  p <- ggplot(temp, aes_string(x = predictor, y = response)) +
+    stat_summary(fun.data = mean_sdl, fun.args = list(mult = 1), geom = "ribbon", fill = USE.COLOR, alpha = 0.2) +
+    stat_summary(aes(group = Condition), fun.y = mean, geom = "line", size = 1, linetype = 2, color = "black") +
+    stat_summary(fun.y = mean, geom = "point", size = 3, shape = 15, color = USE.COLOR) +
+    stat_summary(fun.y = mean, geom = "point", size = 3, shape = 0, color = "Black") +
+    geom_point(size = 2, shape = 1) +
+    ylim(YLIM[1], YLIM[2]) +
+    labs(title = TITLE, x = XLAB, y = YLAB) +
+    coord_capped_cart(bottom = "both", left = "both") +
+    theme(panel.border = element_blank(), axis.line = element_line()) + # needed for lemon
+    theme(text = element_text( face = "bold", size = 14))
+  return(p)
+}
+
+plot_grid(
+  plotlist = purrr::map(1:4, function(i) {
+    CONDITIONS <- c("PS.0", "PS.22", "PS.0.High.Amp", "PS.22.High.Amp")
+    USE.YLIM <- list(c(0,1), c(0,1), c(0,1), c(0,1))
+    USE.TITLE <- c("Coupling Coefficient\nSynchronous", "\nAsynchronous", "", "")
+    USE.XLABS <- c("", "", "Time (Min)", "Time (Min)")
+    USE.YLABS <- c("Control\n", "", "Artificial\n", "")
+    USE.COLORS <- c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3")
+    
+    
+    plot_all_time_pts(
+      temp = df[df$Condition == CONDITIONS[i],],
+      predictor = "Time",
+      response = "cc",
+      YLIM = USE.YLIM[[i]],
+      TITLE = USE.TITLE[i],
+      XLAB = USE.XLABS[i],
+      YLAB = USE.YLABS[i],
+      USE.COLOR = USE.COLORS[i]
+    )
+  }),
+  labels = letters,
+  ncol = 2, nrow = 2
+)
+```
+
+```{r cc plots2}
+plot_means <- function(temp = M[M$Condition %in% CONDITIONS, ],
+                       predictor = "Time",
+                       response = "cc",
+                       YLIM = c(0.25, 0.75),
+                       TITLE = "Coupling Coefficient Over Time",
+                       XLAB = "Time in Minutes",
+                       YLAB = "Coupling Coefficient",
+                       # ymin = .25,
+                       # ymax = 0.75,
+                       USE.COLORS = c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3")) {
+  p <- ggplot(temp, aes_string(x = predictor, y = response, color = temp$Condition, group = temp$Condition)) +
+    # stat_summary(fun.data = mean_sdl, fun.args = list(mult = 1), geom = "ribbon", alpha = 0.2)+
+    geom_pointrange(
+      stat = "summary", fun.ymin = function(z) {
+        mean(z) - sd(z)
+      }, fun.ymax = function(z) {
+        mean(z) + sd(z)
+      }, fun.y = mean#,
+      #position = position_dodge(.9)
+    ) +
+    stat_summary(aes(group = Condition), fun.y = mean, geom = "line", size = 1, linetype = 2) +
+    stat_summary(fun.y = mean, geom = "point", size = 3, shape = 15, alpha = 0.5) +
+    stat_summary(fun.y = mean, geom = "point", size = 3, shape = 15, color = "White") +
+    stat_summary(fun.y = mean, geom = "point", size = 3, shape = 0, color = "Black") +
+    labs(title = TITLE, x = XLAB, y = YLAB) +
+    coord_capped_cart(bottom = "both", left = "both") +
+    theme(panel.border = element_blank(), axis.line = element_line()) + # needed for lemon
+    theme(text = element_text(face = "bold", size = 14)) +
+    theme(legend.position = "") +
+    ylim(YLIM[1], YLIM[2]) +
+    scale_color_manual(values = USE.COLORS)
+  return(p)
+}
+
+# plot_grid(
+#   plotlist = purrr::map(1:4, function(i) {
+#     CONDITIONS <- c("PS.0", "PS.22", "PS.0.High.Amp", "PS.22.High.Amp")
+#     USE.YLIM <- list(c(0,1), c(0,1), c(0,1), c(0,1))
+#     USE.TITLE <- c("Coupling Coefficient\nSynchronous", "\nAsynchronous", "", "")
+#     USE.XLABS <- c("", "", "Time (Min)", "Time (Min)")
+#     USE.YLABS <- c("Control\n", "", "Artificial\n", "")
+#     USE.COLORS <- c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3")
+#     
+#     
+#     plot_means(
+#       temp = df[df$Condition == CONDITIONS[i],],
+#       predictor = "Time",
+#       response = "cc",
+#       YLIM = USE.YLIM[[i]],
+#       TITLE = USE.TITLE[i],
+#       XLAB = USE.XLABS[i],
+#       YLAB = USE.YLABS[i],
+#       USE.COLOR = USE.COLORS[i]
+#     )
+#   }),
+#   labels = letters,
+#   ncol = 2, nrow = 2
+# )
+```
+
+### Effect of Treatments on Input Resistance
+```{r rin plots1&2}
+plot_grid(
+  plotlist = purrr::map(1:4, function(i) {
+    CONDITIONS <- c("PS.0", "PS.22", "PS.0.High.Amp", "PS.22.High.Amp")
+    USE.YLIM <- list(c(0,5), c(0,5), c(0,5), c(0,5))
+    USE.TITLE <- c("Input Resistance\nSynchronous", "\nAsynchronous", "", "")
+    USE.XLABS <- c("", "", "Time (Min)", "Time (Min)")
+    USE.YLABS <- c("Control\n", "", "Artificial\n", "")
+    USE.COLORS <- c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3")
+    
+    
+    plot_all_time_pts(
+      temp = df[df$Condition == CONDITIONS[i],],
+      predictor = "Time",
+      response = "r11",
+      YLIM = USE.YLIM[[i]],
+      TITLE = USE.TITLE[i],
+      XLAB = USE.XLABS[i],
+      YLAB = USE.YLABS[i],
+      USE.COLOR = USE.COLORS[i]
+    )
+  }),
+  labels = letters,
+  ncol = 2, nrow = 2
+)
+
+
+# plot_grid(
+#   plotlist = purrr::map(1:4, function(i) {
+#     CONDITIONS <- c("PS.0", "PS.22", "PS.0.High.Amp", "PS.22.High.Amp")
+#     USE.YLIM <- list(c(0,5), c(0,5), c(0,5), c(0,5))
+#     USE.TITLE <- c("Input Resistance\nSynchronous", "\nAsynchronous", "", "")
+#     USE.XLABS <- c("", "", "Time (Min)", "Time (Min)")
+#     USE.YLABS <- c("Control\n", "", "Artificial\n", "")
+#     USE.COLORS <- c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3")
+# 
+# 
+#     plot_means(
+#       temp = df[df$Condition == CONDITIONS[i],],
+#       predictor = "Time",
+#       response = "r11",
+#       YLIM = USE.YLIM[[i]],
+#       TITLE = USE.TITLE[i],
+#       XLAB = USE.XLABS[i],
+#       YLAB = USE.YLABS[i],
+#       USE.COLOR = USE.COLORS[i]
+#     )
+#   }),
+#   labels = letters,
+#   ncol = 2, nrow = 2
+# )
+```
+
+### Effect of Treatments on Gap Junctional Resistance
+```{r gj plots1&2}
+plot_grid(
+  plotlist = purrr::map(1:4, function(i) {
+    CONDITIONS <- c("PS.0", "PS.22", "PS.0.High.Amp", "PS.22.High.Amp")
+    USE.YLIM <- list(c(0,9), c(0,9), c(0,9), c(0,9))
+    USE.TITLE <- c("Gap Junctional Resistance\nSynchronous", "\nAsynchronous", "", "")
+    USE.XLABS <- c("", "", "Time (Min)", "Time (Min)")
+    USE.YLABS <- c("Control\n", "", "Artificial\n", "")
+    USE.COLORS <- c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3")
+    
+    
+    plot_all_time_pts(
+      temp = df[df$Condition == CONDITIONS[i],],
+      predictor = "Time",
+      response = "gj",
+      YLIM = USE.YLIM[[i]],
+      TITLE = USE.TITLE[i],
+      XLAB = USE.XLABS[i],
+      YLAB = USE.YLABS[i],
+      USE.COLOR = USE.COLORS[i]
+    )
+  }),
+  labels = letters,
+  ncol = 2, nrow = 2
+)
+
+
+# plot_grid(
+#   plotlist = map(1:4, function(i) {
+#     CONDITIONS <- c("PS.0", "PS.22", "PS.0.High.Amp", "PS.22.High.Amp")
+#     USE.YLIM <- list(c(0,9), c(0,9), c(0,9), c(0,9))
+#     USE.TITLE <- c("Gap Junctional Resistance\nSynchronous", "\nAsynchronous", "", "")
+#     USE.XLABS <- c("", "", "Time (Min)", "Time (Min)")
+#     USE.YLABS <- c("Control\n", "", "Artificial\n", "")
+#     USE.COLORS <- c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3")
+#     
+#     
+#     plot_means(
+#       temp = df[df$Condition == CONDITIONS[i],],
+#       predictor = "Time",
+#       response = "gj",
+#       YLIM = USE.YLIM[[i]],
+#       TITLE = USE.TITLE[i],
+#       XLAB = USE.XLABS[i],
+#       YLAB = USE.YLABS[i],
+#       USE.COLOR = USE.COLORS[i]
+#     )
+#   }),
+#   labels = letters,
+#   ncol = 2, nrow = 2
+# )
+```
+
+
+
+# Effects of Depolarization and Asynchrony on Coupling
+PS.0 
+PS.0.High.Amp
+PS.22
+PS.22.High.Amp 
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Deprecated as of Thu May 30 12:29:23 2019 ------------------------------
+
+## TEST for djs: when grouped does gj hit significance?
+
+With the following groups:
+  "PS.0.High.Amp", 
+  #"Inv", 
+  "PS.0", "PS.0.TEA", "PS.22", "PS.22.High.Amp", 
+  #"PS.22.orig", 
+  "PS.45"#, 
+  #"Silent.53mV", 
+  #"PS.0.orig", "PS.180.orig", "PS.90.orig", "PS.45.orig"
+At 40 minutes (but not 20 minutes) gj (but not rc) is <0.05. If we drop one outlier from the syncrhonous group at this time point then p for rc = 0.05.
+
+```{r}
+#head(M.gj)
+
+d <- M.gj
+d <- d[d$Condition %in% c(
+  "PS.0.High.Amp", 
+  #"Inv", 
+  "PS.0", "PS.0.TEA", "PS.22", "PS.22.High.Amp", 
+  #"PS.22.orig", 
+  "PS.45"#, 
+  #"Silent.53mV", 
+  #"PS.0.orig", "PS.180.orig", "PS.90.orig", "PS.45.orig"
+                          ),]
+
+d <- d[d$Time == 40, ]
+d <- d[!(d$rc > 7 & d$Time ==40),] #Drop apparent outlier
+
+
+d$Sync <- "Sync"
+d[d$Condition %in% c(
+  #"PS.0.High.Amp", "Inv", "PS.0", "PS.0.TEA", 
+  "PS.22", "PS.22.High.Amp", "PS.22.orig", "PS.45", #"Silent.53mV", 
+  #"PS.0.orig", 
+  "PS.180.orig", "PS.90.orig", "PS.45.orig"
+  ), "Sync"] <- "Async"
+
+d$Sync <- as.factor(d$Sync)
+unique(M.gj$Condition)
+
+#lm(gj ~ Sync, d) %>% summary()
+
+cowplot::plot_grid(plotlist = list(
+
+ggplot(d, aes(x = Sync, y = gj, color = Sync))+
+  geom_boxplot(color = "black")+
+  geom_jitter()+
+  labs(title = paste("gj p=", as.character(round(summary(lm(gj ~ Sync, d))$coefficients[2, 4], digits = 3)))),
+
+ggplot(d, aes(x = Sync, y = rc, color = Sync))+
+  geom_boxplot(color = "black")+
+  geom_jitter()+
+  labs(title = paste("rc p=", as.character(round(summary(lm(rc ~ Sync, d))$coefficients[2, 4], digits = 3))))
+))
+
+```
+
+However, looking at the amplitude suggests a possible interaction effect withlack of synchrony, but nothing overwhelming.
+
+```{r}
+d$amp <- "low"
+d[d$Condition %in% c("PS.0.High.Amp", "PS.22.High.Amp"), "amp"] <- "high"
+
+cowplot::plot_grid(plotlist = list(
+
+ggplot(d, aes(x = Sync, y = gj, color = amp))+
+  geom_boxplot(color = "black")+
+  geom_jitter()+
+  labs(title = paste("gj p=", as.character(round(summary(lm(gj ~ Sync, d))$coefficients[2, 4], digits = 3)))),
+
+ggplot(d, aes(x = Sync, y = rc, color = amp))+
+  geom_boxplot(color = "black")+
+  geom_jitter()+
+  labs(title = paste("rc p=", as.character(round(summary(lm(rc ~ Sync, d))$coefficients[2, 4], digits = 3))))
+))
+```
+
+## TEST for djs: when grouped do currents hit significance?
+
+Here we have some confusing results.
+
+at 20 minutes:
+  htk~sync < 0.05
+  htk~amp  < 0.05
+  a~sync   
+  a~amp    
+
+however at 40 minutes:
+  htk~sync < 0.05
+  htk~amp  < 0.05
+  a~sync   
+  a~amp    < 0.05
+  
+  
+
+```{r}
+d <- M
+d <- d[d$Condition %in% c(
+  "PS.0.High.Amp", 
+  #"Inv", 
+  "PS.0", 
+  #"PS.0.TEA", 
+  "PS.22", "PS.22.High.Amp", 
+  #"PS.22.orig", 
+  "PS.45"#, 
+  #"Silent.53mV", 
+  #"PS.0.orig", "PS.180.orig", "PS.90.orig", "PS.45.orig"
+                          ),]
+ d <- d[d$Time == 40, ]
+# d <- d[!(d$rc > 7 & d$Time ==40),] #Drop apparent outlier
+
+d$Sync <- "Sync"
+d[d$Condition %in% c(
+  #"PS.0.High.Amp", "Inv", "PS.0", "PS.0.TEA", 
+  "PS.22", "PS.22.High.Amp", "PS.22.orig", "PS.45", #"Silent.53mV", 
+  #"PS.0.orig", 
+  "PS.180.orig", "PS.90.orig", "PS.45.orig"
+  ), "Sync"] <- "Async"
+
+
+d$amp <- "low"
+d[d$Condition %in% c("PS.0.High.Amp", "PS.22.High.Amp"), "amp"] <- "high"
+
+
+cowplot::plot_grid(plotlist = list(
+ggplot(d, aes(x = Sync, y = htk.peak.nA, color = amp))+
+  geom_boxplot(color = "black")+
+  geom_jitter()+
+  labs(title = paste("htk.peak.nA p=", as.character(round(summary(lm(htk.peak.nA ~ Sync, d))$coefficients[2, 4], digits = 3)))),
+
+ggplot(d, aes(x = amp, y = htk.peak.nA, color = Sync))+
+  geom_boxplot(color = "black")+
+  geom_jitter()+
+  labs(title = paste("htk.peak.nA p=", as.character(round(summary(lm(htk.peak.nA ~ amp, d))$coefficients[2, 4], digits = 3)))),
+
+ggplot(d, aes(x = Sync, y = a.peak.nA, color = amp))+
+  geom_boxplot(color = "black")+
+  geom_jitter()+
+  labs(title = paste("a.peak.nA p=", as.character(round(summary(lm(a.peak.nA ~ Sync, d))$coefficients[2, 4], digits = 3)))),
+
+ggplot(d, aes(x = amp, y = a.peak.nA, color = Sync))+
+  geom_boxplot(color = "black")+
+  geom_jitter()+
+  labs(title = paste("a.peak.nA p=", as.character(round(summary(lm(a.peak.nA ~ amp, d))$coefficients[2, 4], digits = 3))))
+))
+
+```
+
+
+```{r}
+# This one sparks joy. 
+lm(a.peak.nA   ~ amp + Sync, d[d$Time == 40, ]) %>% summary()
+
+# This one does not spark joy.
+lm(htk.peak.nA ~ amp + Sync, d[d$Time == 40 & d$Condition != "PS.45", ]) %>% summary()
+lm(htk.peak.nA ~ amp       , d[d$Time == 40 & d$Condition != "PS.45", ]) %>% summary()
+lm(htk.peak.nA ~       Sync, d[d$Time == 40 & d$Condition != "PS.45", ]) %>% summary()
+
+fm <- lm(htk.peak.nA ~  Condition, d[d$Time == 40 & d$Condition != "PS.45", ])
+fm.out <- agricolae::HSD.test(fm, "Condition")
+fm.out
+
+```
+
+
+```{r}
+# 
+# out <- run_standardized_lme_resample(
+#       response.var = "gj",
+#       input.df = M.gj[M.gj$Condition %in% c("PS.0.High.Amp", "PS.0", "PS.22", "PS.22.High.Amp"), ],
+#       nreps = 1e3, #FIXME
+#       use.seed = 432431,
+#       mute.completion = TRUE,
+#       mute.time = FALSE
+#     )
+# 
+# head(out)
+# 
+# 
+# walk(out, function(x){
+#   one_tail_to_epval(input.array = x, tail = "upper") %>% print()
+# })
+# one_tail_to_epval(input.array = out$Phase, tail = "upper")
+# 
+
+```
+
+
+## TEST for djs: paired tests significance?
+only original 
+```{r}
+d <- M
+d <- d[d$Condition %in% c(
+  # "PS.0.High.Amp", 
+  # #"Inv", 
+  # "PS.0", 
+  # #"PS.0.TEA", 
+  # "PS.22", "PS.22.High.Amp"#, 
+  "PS.22.orig", 
+  #"PS.45"#, 
+  #"Silent.53mV", 
+  "PS.0.orig", "PS.180.orig", "PS.90.orig", "PS.45.orig"
+                          ),]
+
+
+d$Sync <- "Sync"
+d[d$Condition %in% c(
+  #"PS.0.High.Amp", "Inv", "PS.0", "PS.0.TEA", 
+  "PS.22", "PS.22.High.Amp", "PS.22.orig", "PS.45", #"Silent.53mV", 
+  #"PS.0.orig", 
+  "PS.180.orig", "PS.90.orig", "PS.45.orig"
+  ), "Sync"] <- "Async"
+
+
+d$amp <- "low"
+d[d$Condition %in% c("PS.0.High.Amp", "PS.22.High.Amp"), "amp"] <- "high"
+
+
+d$CellID <- paste(d$Experiment, d$Inj_Cell, sep = ".")
+
+d <- d[d$Time %in% c(0, 20, 40), c("cc", "Time", "CellID", "Sync", "amp")]
+
+d <- d[complete.cases(d),]
+
+d <- d %>% spread("Time", "cc")
+
+d <- d[complete.cases(d),]
+# d <- d[!(d$cc > 7 & d$Time ==40),] #Drop apparent outlier
+
+
+cowplot::plot_grid(plotlist = list(
+ggplot(gather(d, "Time", "cc", 4:6), aes(x = Time, y = cc))+
+  geom_boxplot(color = "firebrick")+
+  lemon::geom_pointline(aes(group = CellID), size = 1.5)+
+  facet_grid(amp~Sync),
+ 
+ggplot(gather(d, "Time", "cc", c(4,6)), aes(x = Time, y = cc))+
+  geom_boxplot(color = "firebrick")+
+  lemon::geom_pointline(aes(group = CellID), size = 1.5)+
+  facet_grid(amp~Sync)
+))
+
+for (i in c("Sync", "Async")){
+  for (j in c("low")){
+    print(paste(i, j))
+    print(paste("0 vs 20:", as.character(round(
+    t.test(x = d[d$Sync == i & d$amp == j, "0"], 
+           y = d[d$Sync == i & d$amp == j, "20"], paired = T)$p.value , digits = 3))))
+
+    print(paste("0 vs 40:", as.character(round(   
+    t.test(x = d[d$Sync == i & d$amp == j, "0"], 
+           y = d[d$Sync == i & d$amp == j, "40"], paired = T)$p.value, digits = 3))))
+  }
+}
+```
+
+```{r gj}
+d <- M.gj
+d <- d[d$Condition %in% c(
+  "PS.0.High.Amp", 
+  #"Inv", 
+  "PS.0", 
+  #"PS.0.TEA", 
+  "PS.22", "PS.22.High.Amp"#, 
+  #"PS.22.orig", 
+  #"PS.45"#, 
+  #"Silent.53mV", 
+  #"PS.0.orig", "PS.180.orig", "PS.90.orig", "PS.45.orig"
+                          ),]
+
+
+d$Sync <- "Sync"
+d[d$Condition %in% c(
+  #"PS.0.High.Amp", "Inv", "PS.0", "PS.0.TEA", 
+  "PS.22", "PS.22.High.Amp", "PS.22.orig", "PS.45", #"Silent.53mV", 
+  #"PS.0.orig", 
+  "PS.180.orig", "PS.90.orig", "PS.45.orig"
+  ), "Sync"] <- "Async"
+
+
+d$amp <- "low"
+d[d$Condition %in% c("PS.0.High.Amp", "PS.22.High.Amp"), "amp"] <- "high"
+
+
+d$CellID <- paste(d$Experiment, d$Inj_Cell, sep = ".")
+
+d <- d[d$Time %in% c(0, 20, 40), c("gj", "Time", "CellID", "Sync", "amp")]
+
+d <- d[complete.cases(d),]
+
+d <- d %>% spread("Time", "gj")
+
+d <- d[complete.cases(d),]
+# d <- d[!(d$rc > 7 & d$Time ==40),] #Drop apparent outlier
+
+
+cowplot::plot_grid(plotlist = list(
+ggplot(gather(d, "Time", "gj", 4:6), aes(x = Time, y = gj))+
+  geom_boxplot(color = "firebrick")+
+  lemon::geom_pointline(aes(group = CellID), size = 1.5)+
+  facet_grid(Sync~amp),
+ 
+ggplot(gather(d, "Time", "gj", c(4,6)), aes(x = Time, y = gj))+
+  geom_boxplot(color = "firebrick")+
+  lemon::geom_pointline(aes(group = CellID), size = 1.5)+
+  facet_grid(Sync~amp)
+))
+
+for (i in c("Sync", "Async")){
+  for (j in c("low", "high")){
+    print(paste(i, j))
+    print(paste("0 vs 20:", as.character(round(
+    t.test(x = d[d$Sync == i & d$amp == j, "0"], 
+           y = d[d$Sync == i & d$amp == j, "20"], paired = T)$p.value , digits = 3))))
+
+    print(paste("0 vs 40:", as.character(round(   
+    t.test(x = d[d$Sync == i & d$amp == j, "0"], 
+           y = d[d$Sync == i & d$amp == j, "40"], paired = T)$p.value, digits = 3))))
+  }
+}
+
+
+
+d <- d[, c(1:4,6)] %>% gather(Time, output, 4:5)
+fm <- lme(output ~ Time*Sync + Time*amp + Sync*amp,
+          random = ~1 | CellID,
+          method = "ML", 
+          data = d
+)
+
+
+# fm <- lme(response.var ~ Time * Phase + Time * Amp + Phase * Amp, 
+#           random = ~1 | interact, 
+#           method = "ML", 
+#           data = d)
+
+stats.table <- anova.lme(fm)
+
+
+#summary(fm)
+stats.table
+
+
+
+fm <- lm(output ~ Time*Sync + Time*amp + Sync*amp,
+          
+          data = d
+)
+
+summary(fm)
+
+ph <- agricolae::HSD.test(fm, trt = c("Sync", "amp", "Time"))
+#ph
+```
+
+currents HTK
+```{r}
+d <- M
+d <- d[d$Condition %in% c(
+  "PS.0.High.Amp", 
+  #"Inv", 
+  "PS.0", 
+  #"PS.0.TEA", 
+  "PS.22", "PS.22.High.Amp"#, 
+  #"PS.22.orig", 
+  #"PS.45"#, 
+  #"Silent.53mV", 
+  #"PS.0.orig", "PS.180.orig", "PS.90.orig", "PS.45.orig"
+                          ),]
+
+
+d$Sync <- "Sync"
+d[d$Condition %in% c(
+  #"PS.0.High.Amp", "Inv", "PS.0", "PS.0.TEA", 
+  "PS.22", "PS.22.High.Amp", "PS.22.orig", "PS.45", #"Silent.53mV", 
+  #"PS.0.orig", 
+  "PS.180.orig", "PS.90.orig", "PS.45.orig"
+  ), "Sync"] <- "Async"
+
+
+d$amp <- "low"
+d[d$Condition %in% c("PS.0.High.Amp", "PS.22.High.Amp"), "amp"] <- "high"
+
+
+d$CellID <- paste(d$Experiment, d$Inj_Cell, sep = ".")
+
+d <- d[d$Time %in% c(0, 20, 40), c("htk.peak.nA", "Time", "CellID", "Sync", "amp")]
+
+d <- d[complete.cases(d),]
+
+d <- d %>% spread("Time", "htk.peak.nA")
+
+d <- d[complete.cases(d),]
+# d <- d[!(d$rc > 7 & d$Time ==40),] #Drop apparent outlier
+
+
+cowplot::plot_grid(plotlist = list(
+ggplot(gather(d, "Time", "key", 4:6), aes(x = Time, y = key))+
+  geom_boxplot(color = "firebrick")+
+  lemon::geom_pointline(aes(group = CellID), size = 1.5)+
+  facet_grid(Sync~amp),
+ 
+ggplot(gather(d, "Time", "key", c(4,6)), aes(x = Time, y = key))+
+  geom_boxplot(color = "firebrick")+
+  lemon::geom_pointline(aes(group = CellID), size = 1.5)+
+  facet_grid(Sync~amp)
+))
+
+for (i in c("Sync", "Async")){
+  for (j in c("low", "high")){
+    print(paste(i, j))
+    print(paste("0 vs 20:", as.character(round(
+    t.test(x = d[d$Sync == i & d$amp == j, "0"], 
+           y = d[d$Sync == i & d$amp == j, "20"], paired = T)$p.value , digits = 3))))
+
+    print(paste("0 vs 40:", as.character(round(   
+    t.test(x = d[d$Sync == i & d$amp == j, "0"], 
+           y = d[d$Sync == i & d$amp == j, "40"], paired = T)$p.value, digits = 3))))
+  }
+}
+
+
+
+d <- d[, c(1:4,6)] %>% gather(Time, output, 4:5)
+fm <- lme(output ~ Time*Sync + Time*amp + Sync*amp,
+          random = ~1 | CellID,
+          method = "ML", 
+          data = d
+)
+
+
+# fm <- lme(response.var ~ Time * Phase + Time * Amp + Phase * Amp, 
+#           random = ~1 | interact, 
+#           method = "ML", 
+#           data = d)
+
+stats.table <- anova.lme(fm)
+
+
+#summary(fm)
+stats.table
+
+
+
+fm <- lm(output ~ Time*Sync + Time*amp + Sync*amp,
+          
+          data = d
+)
+
+summary(fm)
+ph <- agricolae::HSD.test(fm, trt = c("Sync", "amp", "Time"))
+#ph
+```
+
+currents A
+```{r}
+d <- M
+d <- d[d$Condition %in% c(
+  "PS.0.High.Amp", 
+  #"Inv", 
+  "PS.0", 
+  #"PS.0.TEA", 
+  "PS.22", "PS.22.High.Amp"#, 
+  #"PS.22.orig", 
+  #"PS.45"#, 
+  #"Silent.53mV", 
+  #"PS.0.orig", "PS.180.orig", "PS.90.orig", "PS.45.orig"
+                          ),]
+
+
+d$Sync <- "Sync"
+d[d$Condition %in% c(
+  #"PS.0.High.Amp", "Inv", "PS.0", "PS.0.TEA", 
+  "PS.22", "PS.22.High.Amp", "PS.22.orig", "PS.45", #"Silent.53mV", 
+  #"PS.0.orig", 
+  "PS.180.orig", "PS.90.orig", "PS.45.orig"
+  ), "Sync"] <- "Async"
+
+
+d$amp <- "low"
+d[d$Condition %in% c("PS.0.High.Amp", "PS.22.High.Amp"), "amp"] <- "high"
+
+
+d$CellID <- paste(d$Experiment, d$Inj_Cell, sep = ".")
+d <- d[d$Time %in% c(0, 20, 40)
+       , c("a.peak.nA", "Time", "CellID", "Sync", "amp")]
+
+# for looking at all time points. must rm filter above.
+# ggplot(d, aes(x = Time, y = a.peak.nA))+
+#   geom_boxplot(aes(group = Time), color = "firebrick")+
+#   lemon::geom_pointline(aes(group = CellID), size = 1.5)+
+#   facet_grid(Sync~amp)
+
+d <- d[complete.cases(d),]
+
+d <- d %>% spread("Time", "a.peak.nA")
+
+d <- d[complete.cases(d),]
+# d <- d[!(d$rc > 7 & d$Time ==40),] #Drop apparent outlier
+
+
+cowplot::plot_grid(plotlist = list(
+ggplot(gather(d, "Time", "key", 4:6), aes(x = Time, y = key))+
+  geom_boxplot(color = "firebrick")+
+  lemon::geom_pointline(aes(group = CellID), size = 1.5)+
+  facet_grid(Sync~amp),
+ 
+ggplot(gather(d, "Time", "key", c(4,6)), aes(x = Time, y = key))+
+  geom_boxplot(color = "firebrick")+
+  lemon::geom_pointline(aes(group = CellID), size = 1.5)+
+  facet_grid(Sync~amp)
+))
+
+for (i in c("Sync", "Async")){
+  for (j in c("low", "high")){
+    print(paste(i, j))
+    print(paste("0 vs 20:", as.character(round(
+    t.test(x = d[d$Sync == i & d$amp == j, "0"], 
+           y = d[d$Sync == i & d$amp == j, "20"], paired = T)$p.value , digits = 3))))
+
+    print(paste("0 vs 40:", as.character(round(   
+    t.test(x = d[d$Sync == i & d$amp == j, "0"], 
+           y = d[d$Sync == i & d$amp == j, "40"], paired = T)$p.value, digits = 3))))
+  }
+}
+
+
+
+d <- d[, c(1:4,6)] %>% gather(Time, output, 4:5)
+fm <- lme(output ~ Time*Sync + Time*amp + Sync*amp,
+          random = ~1 | CellID,
+          method = "ML", 
+          data = d
+)
+
+
+# fm <- lme(response.var ~ Time * Phase + Time * Amp + Phase * Amp, 
+#           random = ~1 | interact, 
+#           method = "ML", 
+#           data = d)
+
+stats.table <- anova.lme(fm)
+
+
+#summary(fm)
+stats.table
+
+
+
+fm <- lm(output ~ Time*Sync + Time*amp + Sync*amp,
+          
+          data = d
+)
+
+summary(fm)
+ph <- agricolae::HSD.test(fm, trt = c("Sync", "amp", "Time"))
+#ph
+```
+
+## TEST for DJS: in updated dataset overlay currents and passive properties:
+```{r}
+#d <- M
+d <- M.d
+#d <- M.p
+d <- d[d$Condition %in% c(
+  "PS.0.High.Amp",
+  #"Inv",
+  "PS.0",
+  #"PS.0.TEA",
+  "PS.22", "PS.22.High.Amp",
+  #"PS.22.orig",
+  "PS.45"#,
+  #"Silent.53mV",
+  #"PS.0.orig", "PS.180.orig", "PS.90.orig", "PS.45.orig"
+                          ),]
+
+#levels(d$Condition)
+
+d$Condition <- factor(d$Condition, levels = c(
+#"PS.0.orig", "PS.22.orig", "PS.45.orig",  "PS.90.orig", "PS.180.orig"#,
+"PS.0", "PS.22", "PS.45", "PS.0.High.Amp", "PS.22.High.Amp"#,
+#"PS.0.TEA", "Silent.TEA", "Inv", "Silent.53mV"
+))
+
+
+
+# ggplot(d[d$a.peak.mV < 5 & d$a.peak.mV > -5,],
+#        aes(x = rc, y = a.peak.nA))+
+#   geom_point()+
+#   geom_hline(yintercept = 0)+
+#   geom_vline(xintercept = 0)+
+#   geom_smooth(aes(group = Condition, color = Condition), method = lm, se = F)+
+#   ylim(-10, 50)+
+#   theme(legend.position = "")+
+#   facet_grid(Condition~Time)
+#
+#
+# ggplot(d[d$a.end.mV < 5 & d$a.end.mV > -5,],
+#        aes(x = rc, y = a.end.nA))+
+#   geom_point()+
+#   geom_hline(yintercept = 0)+
+#   geom_vline(xintercept = 0)+
+#   geom_smooth(aes(group = Condition, color = Condition), method = lm, se = F)+
+#   ylim(-10, 50)+
+#   theme(legend.position = "")+
+#   facet_grid(Condition~Time)
+
+
+d$cc <- d$cc/sd(d$cc, na.rm = T)
+d$rc <- d$rc/sd(d$rc, na.rm = T)
+d$a.peak.nA <- d$a.peak.nA/sd(d$a.peak.nA, na.rm = T)
+d$a.end.nA <- d$a.end.nA/sd(d$a.end.nA, na.rm = T)
+
+
+ggplot()+
+  #geom_point()+
+  stat_summary(data = d[d$a.peak.mV < 5 & d$a.peak.mV > -5,], aes(x = Time, y = rc, group = 1), fun.y = median, colour = "orange", geom = "line", group = 1, size = 1)+
+  stat_summary(data = d[d$a.peak.mV < 5 & d$a.peak.mV > -5,], aes(x = Time, y = a.peak.nA, group = 1), fun.y = median, colour = "green", geom = "line", group = 1, size = 1)+
+  #ylim(-100, 300)+
+  facet_grid(~Condition)
+
+
+
+d <- M#.gj
+d <- d[d$Condition %in% c(
+  "PS.0.High.Amp",
+  #"Inv",
+  "PS.0", #"PS.0.TEA",
+  "PS.22", "PS.22.High.Amp",
+  #"PS.22.orig",
+  "PS.45"#,
+  #"Silent.53mV",
+  #"PS.0.orig", "PS.180.orig", "PS.90.orig", "PS.45.orig"
+                          ),]
+
+# d <- d[d$Time == 40, ]
+# d <- d[!(d$rc > 7 & d$Time ==40),] #Drop apparent outlier
+
+
+d$Sync <- "Sync"
+d[d$Condition %in% c(
+  #"PS.0.High.Amp", "Inv", "PS.0", "PS.0.TEA",
+  "PS.22", "PS.22.High.Amp", "PS.22.orig", "PS.45", #"Silent.53mV",
+  #"PS.0.orig",
+  "PS.180.orig", "PS.90.orig", "PS.45.orig"
+  ), "Sync"] <- "Async"
+
+d$amp <- "Sync"
+d[d$Condition %in% c(
+  #"PS.0.High.Amp", "Inv", "PS.0", "PS.0.TEA",
+  "PS.22", "PS.22.High.Amp", "PS.22.orig", "PS.45", #"Silent.53mV",
+  #"PS.0.orig",
+  "PS.180.orig", "PS.90.orig", "PS.45.orig"
+  ), "Sync"] <- "Async"
+
+d$amp <- "low"
+d[d$Condition %in% c("PS.0.High.Amp", "PS.22.High.Amp"), "amp"] <- "high"
+
+
+
+
+group_vector <- paste(d$Experiment, d$Inj_Cell)
+
+cowplot::plot_grid(plotlist = list(
+  # ggplot()+
+  #   lemon::geom_pointline(data = d[d$a.peak.mV < 5 & d$a.peak.mV > -5,],
+  #               aes(x= Time, y = rc, group = group_vector, color = Condition),
+  #               se = F )+
+  #   theme(legend.position = "")+
+  #   facet_grid(~Condition),
+
+  ggplot(
+    data = d[d$a.peak.mV < 5 & d$a.peak.mV > -5, ],
+    aes(x = Time, y = cc, group = group_vector, color = Condition)
+  ) +
+    # geom_boxplot(aes(group = Time), color = "black")+
+    lemon::geom_pointline(
+      alpha = 0.3
+    ) + stat_summary(aes(group = 1), fun.y = mean, colour = "red", geom = "line", group = 1, size = 1) +
+    stat_summary(aes(group = 1), fun.y = median, colour = "blue", geom = "line", group = 1, size = 1) +
+    theme(legend.position = "") +
+    facet_grid(~Condition),
+
+  ggplot(
+    data = d[d$a.peak.mV < 5 & d$a.peak.mV > -5, ],
+    aes(x = Time, y = rc, group = group_vector, color = Condition)
+  ) +
+    # geom_boxplot(aes(group = Time), color = "black")+
+    lemon::geom_pointline(
+      alpha = 0.3
+    ) + stat_summary(aes(group = 1), fun.y = mean, colour = "red", geom = "line", group = 1, size = 1) +
+    stat_summary(aes(group = 1), fun.y = median, colour = "blue", geom = "line", group = 1, size = 1) +
+    theme(legend.position = "") +
+    facet_grid(~Condition),
+
+  ggplot(
+    data = d[d$a.peak.mV < 5 & d$a.peak.mV > -5, ],
+    aes(x = Time, y = a.peak.nA, group = group_vector, color = Condition)
+  ) +
+    # geom_boxplot(aes(group = Time), color = "black")+
+    lemon::geom_pointline(
+      alpha = 0.3
+    ) + stat_summary(aes(group = 1), fun.y = mean, colour = "red", geom = "line", group = 1, size = 1) +
+    stat_summary(aes(group = 1), fun.y = median, colour = "blue", geom = "line", group = 1, size = 1) +
+    theme(legend.position = "") +
+    facet_grid(~Condition)+
+    ylim(0, 60),
+
+  ggplot(
+    data = d[d$a.end.mV < 5 & d$a.end.mV > -5, ],
+    aes(x = Time, y = a.end.nA, color = Condition)
+  ) +
+    # geom_boxplot(aes(group = Time), color = "black")+
+    lemon::geom_pointline(aes(group = group_vector),
+      alpha = 0.3
+    ) + stat_summary(aes(group = 1), fun.y = mean, colour = "red", geom = "line", group = 1, size = 1) +
+    stat_summary(aes(group = 1), fun.y = median, colour = "blue", geom = "line", group = 1, size = 1) +
+    theme(legend.position = "") +
+    facet_grid(~Condition)+
+    ylim(0, 50)
+), nrow = 4, ncol = 1)
+
+
+
+```
+
+
+
+
+
+## TEST for DJS: visualize standardized 0-90.
+```{r}
+d <- M
+#d <- M.d
+#d <- M.p
+d <- d[d$Condition %in% c(
+  "PS.0",
+  "PS.22",
+  "PS.45",
+  "PS.90"
+
+                          ),]
+
+# Drop weird point
+# d <- d[!(d$Experiment == "170802a" &
+#          d$Inj_Cell == "LC5"),]
+# d <- d[d$Time < 55,]
+#levels(d$Condition)
+
+d$Condition <- factor(d$Condition, levels = c(
+ "PS.0",
+"PS.22",
+"PS.45",
+"PS.90"
+))
+
+
+group_vector <- paste(d$Experiment, d$Inj_Cell)
+
+ggplot(d, aes(x = Time, y = gj, color =  Experiment))+
+  geom_pointline(aes(group = group_vector))+
+  facet_grid(.~Condition)+
+  xlim(0,60) # one of the few cases to prefer over coord_cartesian
+
+
+#d[d$Time == 20 & !is.na(d$gj), "Experiment"] %>% unique()
+
+
+```
+
+
+#Shelved Components
+
+## Silenced validation: methods: online vs offline peak comparison ==== 
+
+### How close a online and offline leak subtracted measures of HTK?
+```{r}
+# merge_htk_methods <- function(input.df = htk.peak,
+#                               input.df.ls = htk.ls.peak){
+# 
+#   input.df <- input.df[, !(names(input.df) %in% c("Recording"))]
+#   input.df.ls <- input.df.ls[, !(names(input.df.ls) %in% c("Recording"))]
+# 
+#   input.df$Experiment <- as.character(input.df$Experiment)
+#   input.df$IN4 <- as.character(input.df$IN4)
+#   input.df$IN9 <- as.character(input.df$IN9)
+# 
+#   input.df$target.mV <- ((round((input.df$mV)/10))*10)
+#   input.df.ls$target.mV <- ((round((input.df.ls$mV)/10))*10)
+# 
+#   input.df <- input.df %>% rename(manual.nA = "nA")
+#   input.df <- input.df %>% rename(manual.mV = "mV")
+# 
+#   input.df.ls <- input.df.ls %>% rename(online.mV = "mV")
+#   input.df.ls <- input.df.ls %>% rename(online.nA = "nA")
+# 
+#   return(dplyr::full_join(input.df, input.df.ls))
+# }
+# 
+# htk.comparison <- merge_htk_methods(input.df = htk.peak,
+#                                     input.df.ls = htk.ls.peak)
+```
+
+#### All the data: peak
+```{r}
+# peak.htk.mv <- ggplot(htk.comparison, aes(x = manual.mV, y = online.mV))+
+#   geom_abline(slope = 1, intercept = 0, linetype = "dashed")+
+#   geom_point(aes(color = interact), alpha = 0.4)+
+#   geom_smooth(method = lm)+
+#   geom_text(x = -30, y = -80, label = lm_eqn(m = lm(`online.mV`~`manual.mV`, data = htk.comparison)), parse = TRUE)+
+#   theme(legend.position = "")+
+#   ylim(-80,20)+
+#   xlim(-80,20)+
+#   labs(title = "No Systematic Difference in Voltage Control")
+# 
+# 
+# 
+# peak.htk.na <- ggplot(htk.comparison, aes(x = manual.nA, y = online.nA))+
+#   geom_abline(slope = 1, intercept = 0, linetype = "dashed")+
+#   geom_point(aes(color = interact), alpha = 0.4)+
+#   geom_smooth(method = lm)+
+#   geom_text(x = 225, y = 0, label = lm_eqn(m = lm(`online.nA`~`manual.nA`, data = htk.comparison)), parse = TRUE)+
+#   ylim(0,450)+
+#   xlim(0,450)+
+#   theme(legend.position = "")+
+#   labs(title = "Measures of HTK Transient Differ Based on \nLeak Subtraction Method")
+
+
+```
+
+#### Broken down by target voltage: peak
+```{r}
+# voltages <- c(-80, -70, -60, -50, -40, -30, -20, -10,  0, 10, 20)
+# compare.htk.methods <- list()
+# for (i in 1:length(voltages)){
+#   compare.htk.methods[[i]] <- 
+#     ggplot(htk.comparison[htk.comparison$target.mV == voltages[i], ], aes(x = manual.nA, y = online.nA))+
+#     geom_abline(slope = 1, intercept = 0, linetype = "dashed")+
+#     geom_point(aes(color = interact))+
+#     geom_smooth(method = lm, color = "red")+
+#     labs(title = paste("At", as.character(voltages[i]), "mV"))+
+#     theme(legend.position = "")
+#   
+# }
+# cowplot::plot_grid(plotlist = compare.htk.methods)
+
+
+```
+
+#### Looking at the differences: peak
+```{r}
+# htk.comparison[,"nA.diff"] <- (htk.comparison[,"online.nA"] - htk.comparison[,"manual.nA"])
+# 
+# lower.sd <- (mean(na.omit(htk.comparison$nA.diff)) - sd(na.omit(htk.comparison$nA.diff)))
+# upper.sd <- (mean(na.omit(htk.comparison$nA.diff)) + sd(na.omit(htk.comparison$nA.diff)))
+# q1 <- as.numeric(summary(htk.comparison$nA.diff)[2])
+# q2 <- as.numeric(summary(htk.comparison$nA.diff)[3])
+# q3 <- as.numeric(summary(htk.comparison$nA.diff)[5])
+# 
+# htk.comparison$target.mV <- as.factor(htk.comparison$target.mV)
+# ggplot(htk.comparison, aes(x = nA.diff, fill = target.mV))+
+#   geom_histogram(bins = 100)+
+#   geom_segment(aes(x = lower.sd,
+#                    y = -15,
+#                    xend = upper.sd, 
+#                    yend = -15), 
+#                color = "red",
+#                size = 1
+#   )+
+#   geom_segment(aes(x = mean(na.omit(htk.comparison$nA.diff)),
+#                    y = -10,
+#                    xend = mean(na.omit(htk.comparison$nA.diff)), 
+#                    yend = -20), 
+#                color = "red",
+#                size = 1
+#   )+
+#   geom_segment(aes(x = q1,
+#                    y = -5,
+#                    xend = q3, 
+#                    yend = -5), 
+#                color = "blue",
+#                size = 1
+#   )+
+#   geom_segment(aes(x = q2,
+#                    y = 0,
+#                    xend = q2, 
+#                    yend = -10), 
+#                color = "blue",
+#                size = 1)+
+#   labs(title = "Online less Offline nA: \nQuartiles Denoted in Blue \nStandard Deviation in Red")+
+#   theme(legend.position = "right")
+
+```
+
+#### All the data: end
+```{r}
+# htk.comparison <- merge_htk_methods(input.df = htk.end,
+#                                     input.df.ls = htk.ls.end)
+```
+
+```{r}
+# end.htk.mv <- ggplot(htk.comparison, aes(x = manual.mV, y = online.mV))+
+#   geom_abline(slope = 1, intercept = 0, linetype = "dashed")+
+#   geom_point(aes(color = interact), alpha = 0.4)+
+#   geom_smooth(method = lm)+
+#   theme(legend.position = "")+
+#   ylim(-80,20)+
+#   xlim(-80,20)+
+#   labs(title = "No Systematic Difference in Voltage Control")+
+#   geom_text(x = -30, y = -75, label = lm_eqn(m = lm(`online.mV`~`manual.mV`, data = htk.comparison)), parse = TRUE)
+# 
+# end.htk.na <- ggplot(htk.comparison, aes(x = manual.nA, y = online.nA))+
+#   geom_abline(slope = 1, intercept = 0, linetype = "dashed")+
+#   geom_point(aes(color = interact), alpha = 0.4)+
+#   geom_smooth(method = lm)+
+#   ylim(0,450)+
+#   xlim(0,450)+
+#   theme(legend.position = "")+
+#   labs(title = "Measures of HTK Transient Differ Based on \nLeak Subtraction Method")+
+#   geom_text(x = 225, y = 0, label = lm_eqn(m = lm(`online.nA`~`manual.nA`, data = htk.comparison)), parse = TRUE)
+
+```
+
+#### Broken down by target voltage: end
+```{r}
+# voltages <- c(-80, -70, -60, -50, -40, -30, -20, -10,  0, 10, 20)
+# compare.htk.methods <- list()
+# for (i in 1:length(voltages)){
+#   compare.htk.methods[[i]] <- 
+#     ggplot(htk.comparison[htk.comparison$target.mV == voltages[i], ], aes(x = manual.nA, y = online.nA))+
+#     geom_abline(slope = 1, intercept = 0, linetype = "dashed")+
+#     geom_point(aes(color = interact))+
+#     geom_smooth(method = lm, color = "red")+
+#     labs(title = paste("At", as.character(voltages[i]), "mV"))+
+#     theme(legend.position = "")
+# }
+# cowplot::plot_grid(plotlist = compare.htk.methods)
+
+```
+
+#### Looking at the differences: end
+```{r}
+# htk.comparison[,"nA.diff"] <- (htk.comparison[,"online.nA"] - htk.comparison[,"manual.nA"])
+# 
+# lower.sd <- (mean(na.omit(htk.comparison$nA.diff)) - sd(na.omit(htk.comparison$nA.diff)))
+# upper.sd <- (mean(na.omit(htk.comparison$nA.diff)) + sd(na.omit(htk.comparison$nA.diff)))
+# q1 <- as.numeric(summary(htk.comparison$nA.diff)[2])
+# q2 <- as.numeric(summary(htk.comparison$nA.diff)[3])
+# q3 <- as.numeric(summary(htk.comparison$nA.diff)[5])
+# 
+# htk.comparison$target.mV <- as.factor(htk.comparison$target.mV)
+# ggplot(htk.comparison, aes(x = nA.diff, fill = target.mV))+
+#   geom_histogram(bins = 100)+
+#   geom_segment(aes(x = lower.sd,
+#                    y = -15,
+#                    xend = upper.sd, 
+#                    yend = -15), 
+#                color = "red",
+#                size = 1
+#   )+
+#   geom_segment(aes(x = mean(na.omit(htk.comparison$nA.diff)),
+#                    y = -10,
+#                    xend = mean(na.omit(htk.comparison$nA.diff)), 
+#                    yend = -20), 
+#                color = "red",
+#                size = 1
+#   )+
+#   geom_segment(aes(x = q1,
+#                    y = -5,
+#                    xend = q3, 
+#                    yend = -5), 
+#                color = "blue",
+#                size = 1
+#   )+
+#   geom_segment(aes(x = q2,
+#                    y = 0,
+#                    xend = q2, 
+#                    yend = -10), 
+#                color = "blue",
+#                size = 1)+
+#   labs(title = "Online less Offline nA: \nQuartiles Denoted in Blue \nStandard Deviation in Red")+
+#   theme(legend.position = "right")
+
+```
+
+
+## Statistics -- Bayesian approach:
+```{r}
+#Shelved for the time being
+
+# #backup <- df.gj
+# df.gj <- backup
+# 
+# head(df)
+# head(df.gj)
+# 
+# library(rethinking)
+# 
+# df.gj <- df.gj[, c(#"Condition",
+#   #"rc",
+#   "gj","Experiment","Time","Inj_Cell","Synchrony","Stimulation")]
+# 
+# # df.gj <- df.gj[!is.nan(df.gj$gj) &
+# #                  !is.na(df.gj$gj), ]
+# df.gj <- df.gj[complete.cases(df.gj), ] #c("gj", "Synchrony")
+# 
+# df.gj <- df.gj[df.gj$Time < 30,]
+# 
+# 
+# df.gj$Synchrony <- rethinking::coerce_index(df.gj$Synchrony)
+# df.gj$Stimulation <- rethinking::coerce_index(df.gj$Stimulation)
+# #df.gj$Time <- rethinking::coerce_index(df.gj$Time)
+# df.gj$Inj_Cell <- rethinking::coerce_index(df.gj$Inj_Cell)
+# 
+# fm <- rethinking::map2stan(alist(
+#   gj ~ dnorm(mu, sigma),
+#   mu ~ a + bSy*Synchrony + bSt*Stimulation + bSySt*Synchrony*Stimulation + bT*Time,
+#   a ~ dnorm(2.4, 2),
+#   bSy ~ dnorm(0, 2),
+#   bSt ~ dnorm(0, 2),
+#   bSySt ~ dnorm(0, 2),
+#   bT ~ dnorm(0, 2),
+#   sigma ~ dunif(0, 10)
+# ),data = df.gj)
+# 
+# plot(fm)
+# 
+# post <- extract.samples(fm)
+# 
+# pairs(post)
+# 
+# pairs(fm)
+# 
+# show(fm)
+# 
+# plot(fm)
+# 
+# precis(fm)
+
+
+# What if we control for injected cell?
+
+# What if we control for 
+
+#####################################################################
+# data(rugged)
+# d <- rugged
+# d$log_gdp <- log(d$rgdppc_2000)
+# dd <- d[ complete.cases(d$rgdppc_2000),]
+# 
+# 
+# dd.trim <- dd[, c("log_gdp", "rugged", "cont_africa")]
+# str(dd.trim)
+# 
+# m8.1stan <- map2stan(
+#   alist(
+#     log_gdp ~ dnorm(mu, sigma),
+#     mu <- a +bR*rugged + bA*cont_africa + bAR*rugged*cont_africa, 
+#     a ~ dnorm(0, 100),
+#     bR ~ dnorm(0, 10),
+#     bA ~ dnorm(0, 10),
+#     bAR ~ dnorm(0, 10),
+#     sigma ~ dcauchy(0, 2)
+#   ), 
+#   data = dd.trim)
+# 
+# precis(m8.1stan)
+# 
+# # fm_4chains <- map2stan(m8.1stan, chains = 4, cores = 4)
+# # 
+# # precis(fm_4chains)
+# 
+# post <- extract.samples(m8.1stan)
+# 
+# pairs(post)
+# 
+# pairs(m8.1stan)
+# 
+# show(m8.1stan)
+# 
+# plot(m8.1stan) # not working
+#####################################################################
+
+# # to visualize
+# library(tidybayes)
+# #devtools::install_github("mjskay/tidybayes.rethinking")
+# 
+# library(tidybayes.rethinking)
+# # tidybayes.rethinking::tidy_link()
+# tidybayes.rethinking::tidy_sim()
+# ggplot(out1, aes(x = mu))+
+#   geom_histogram(aes(fill = as.factor(cont_africa)), alpha = 0.3)
+  #facet_grid(cont_africa~.)
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+## Explaining stats
+For each parameter of  interest we used a linear mixed model allowing for interactions between pairs but not triplet of factors. Furthermore, because we noted a large spread in gap junction conductance measurements, we used cell (not cell type) as a random factor in the model. This defined using the `lme` function in the `Nonlinear Mixed-Effects Models` package and was fit with maximum likelihood.
+```{r Set up example statistic}
+#Set up example stat
+response.var <- "rc"
+#input.df = M[M$Condition %in% c("PS.0.High.Amp", "PS.0", "PS.22", "PS.22.High.Amp"), ]
+input.df <-  M.gj[M.gj$Condition %in% c("PS.0.High.Amp", "PS.0", "PS.22", "PS.22.High.Amp"), ]
+
+
+# Transform the data so that it's ready for the test
+input.df <- input.df[!(is.na(input.df[[response.var]])), ]
+input.df$response.var <- input.df[[response.var]]
+# input.df$Time <- as.factor(input.df$Time)
+input.df$interact <- interaction(input.df$Experiment, input.df$Inj_Cell)
+
+input.df$Phase <- "None"
+input.df[input.df$Condition %in% c("PS.22", "PS.22.High.Amp"), "Phase"] <- "Offset"
+input.df[input.df$Condition %in% c("PS.0", "PS.0.High.Amp"), "Phase"] <- "Normal"
+input.df$Amp <- "None"
+input.df[input.df$Condition %in% c("PS.0.High.Amp", "PS.22.High.Amp"), "Amp"] <- "High"
+input.df[input.df$Condition %in% c("PS.0", "PS.22"), "Amp"] <- "Normal"
+
+input.df <- input.df[, c("response.var", "interact", "Time", "Phase", "Amp")]
+
+input.df <- input.df[!duplicated(input.df),]
+
+# Bare bones model
+input.df$Phase <- as.factor(input.df$Phase)
+input.df$Amp <- as.factor(input.df$Amp)
+
+# To make the code a little more clear for the example:
+input.df <- rename(input.df, Cell = interact)
+input.df <- rename(input.df, Coupling.Resist = response.var)
+
+head(input.df) %>% knitr::kable()
+```
+
+
+```{r Example Statistical Model, echo=TRUE}
+#nlme
+fm <- nlme::lme(Coupling.Resist ~ Phase*Amp + Phase*Time + Amp*Time,
+                random = ~1 | Cell,
+                method = "ML", 
+                data = input.df)
+
+print(fm)
+```
+
+
+```{r Example Table}
+stats.table <- nlme::anova.lme(fm)
+
+knitr::kable(stats.table) %>% kable_styling(bootstrap_options = "striped", full_width = F, position = "float_right")
+```
+
+```{r}
+#fm2 <- lm(response.var ~ Phase*Amp,  data = input.df[input.df$Time == 40, ])
+
+#out <- agricolae::HSD.test(fm2, trt=c("Phase","Amp"))
+#out
+
+#agricolae::HSD.test(fm2, trt=c("Phase","Amp"))$groups
+
+#multcomp::glht(fm2, linfct=mcp(Phase="Tukey", Amp="Tukey"))
+#head(input.df)
+```
+
+```{r}
+#fm <- lm(response.var ~ Phase*Amp + Phase*Time + Amp*Time, data = input.df)
+#fm.anova <- car::Anova(fm, type = "III")
+#fm.hsd <- agricolae::HSD.test(fm, trt=c("Phase","Amp","Time"))
+```
+
+```{r }
+#fm.anova %>% knitr::kable()
+```
+
+```{r }
+#fm.hsd$groups %>% knitr::kable()
+```
+
+# Properties of the data
+
+```{r}
+# library("ggExtra")
+# 
+# p <- ggplot(M, aes(x = r1, y = r11))+
+#   geom_point()+
+#   geom_rug()+
+#   theme_tufte()
+# 
+# #p <- ggplot(M, aes(x = r1, y = r11))+ geom_point()
+# 
+# ggExtra::ggMarginal(p)
+# 
+# #GGally::ggscatmat
+```
+
+
+```{r}
+sessionInfo()
+```

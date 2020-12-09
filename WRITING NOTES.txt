@@ -1,0 +1,69 @@
+Background:
+
+There have been a few reviews recently. Here are the ones slated to be organized here:
+
+(O’Brien 2017), (Nagy and Rash 2017), (Miller and Pereda 2017), (Pereda 2016), (Curti and O’Brien 2016), (O’Brien 2014), (Pereda et al 2013), (Goodenough and Paul 2009), (Bennett and Zukin 2004)
+
+
+
+preferential conduction in one direction:
+(Furshpan & potter 1959, Haas 2011, shruti 2014?)
+
+
+with Inap
+There are a fair number of cases for this. Would it be appropriate to cite one preceded with “e.g.” to make it clear it’s drawn from a larger set?
+
+Alcami and Pereda 2019’s refs for more:
+64,69–71.
+
+This could also be helpful: Would let us refer back to golgi for a situation dependent effect.
+Electrical coupling mediates
+tunable low-frequency oscillations and resonance
+in the cerebellar Golgi cell network. Neuron 61,
+126–139 (2009).
+
+
+Can also supplement this with Mauthner cell experiments:
+Curti et al 2012
+Curti and pereda 2004
+
+
+
+
+
+#eltd in retina
+I don’t know of a specific publication with activity dependent LTD, but the retina’s coupling is  “∩” shaped as ambient light increases, so I can probably find something close enough if cleaving to parallelism is worth it.
+
+
+
+
+need to find:
+
+Retina electrical 
+Studies in the retina showed plasticity: 
+•	LTD: (DeVries and Schwartz, 1989; Lasater, 1987; Lasater and Dowling, 1985; McMahon et al., 1989; Picco- lino et al., 1984; Spray and Bennett, 1985)
+•	LTP: (Wang et al., 2015b; Yang et al., 1990).
+
+
+
+Results
+
+same
+
+Discussion
+
+Activity dept gap junction plasticity blocked by Cd2
+earlier?
+
+
+Haas 2011
+wang et al 2015
+Welzel and Schuster 2018
+Fricker 2019
+
+
+
+
+
+	
+	

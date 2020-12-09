@@ -1,0 +1,784 @@
+---
+title: "Vignette Title"
+author: "Vignette Author"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+
+
+library(readxl)
+library(tidyverse)
+library(cowplot)
+library(ggthemes)
+
+```
+
+
+
+```{r}
+d <- readxl::read_excel("C:/Users/drk8b9/Desktop/phase_analysis/test_ctrl_waves.xlsx")
+```
+
+```{r}
+# ggplot(d)+
+#   geom_line(aes(x = Time, y = IN4), color = "steelblue")+
+#   geom_line(aes(x = Time, y = IN9), color = "firebrick")+
+#   geom_line(aes(x = Time, y = (2*IN14)-56), color = "steelblue")
+
+
+```
+
+
+```{r}
+# create artificial dataset:
+d <- d[, c("Time", "IN4",  "IN9", "IN14")]
+
+d$IN9 <- c(d$IN9[13963:nrow(d)], d$IN9[1:13962])
+d$IN15 <- c(d$IN14[13963:nrow(d)], d$IN14[1:13962])
+
+d$Time <- d$Time/1000
+
+d$Time <- d$Time - min(d$Time)
+```
+
+## dVdT
+```{r}
+
+
+# ggplot(d, aes(x = IN9, y = IN9.dVdT, color = Time))+
+#   geom_point()
+# geom_path()
+# ggforce::geom_link2()
+
+
+
+# cowplot::plot_grid(plotlist = list(
+# ggplot(d)+
+#   geom_line(aes(x = Time, y = IN9)),
+# 
+# ggplot(d)+
+#   geom_point(aes(x = Time, y = IN9.dVdT), color = "red")+
+#   geom_line(aes(x = Time, y = IN9.dVdT)),
+# 
+# ggplot(d)+
+#   geom_point(aes(x = Time, y = abs(IN9.dVdT)), color = "red")+
+#   geom_line(aes(x = Time, y = abs(IN9.dVdT)))
+# ), ncol = 1)
+
+```
+
+## using abs(dVdT) and a max interval to define bursts
+```{r eval=FALSE, include=FALSE}
+# ggplot(d)+
+#   geom_point(aes(x = Time, y = abs(IN9.dVdT)), color = "red")+
+#   geom_line(aes(x = Time, y = abs(IN9.dVdT)))+
+#   geom_hline(yintercept = 5)
+
+
+dVdT.thresh <- 5
+max.gap <- 0.5
+
+d$IN9.dVdT.thresh <- F
+
+d[(d$IN9.dVdT > dVdT.thresh |
+    d$IN9.dVdT < (-1*dVdT.thresh)) &
+    !is.na(d$IN9.dVdT), "IN9.dVdT.thresh"] <- T
+
+
+# ggplot(d)+
+#   geom_line(aes(x = Time, y = abs(IN9.dVdT)))+
+#   geom_point(aes(x = Time, y = abs(IN9.dVdT), color = IN9.dVdT.thresh))
+
+
+# finds start/end times by shifting the logical vector, up 1, down 1 and 0, then adding all three. The start/end time should have a value of 2, inside the event a value of 3
+
+d$start.end <- 
+
+as.numeric(d$IN9.dVdT.thresh[seq(from = 1, to = length(d$IN9.dVdT.thresh), by  = 1)]) +
+  # Shift all values up by one
+  c(as.numeric(d$IN9.dVdT.thresh[seq(from = 2, to = length(d$IN9.dVdT.thresh), by  = 1)]),
+  0)+
+  # Shift all values down by one.
+  c(0,
+  as.numeric(d$IN9.dVdT.thresh[seq(from = 1, to = (length(d$IN9.dVdT.thresh)-1), by  = 1)])) 
+  
+ggplot(d)+
+  geom_line(aes(x = Time, y = abs(IN9.dVdT)))+
+  geom_point(aes(x = Time, y = abs(IN9.dVdT), color = as.factor(start.end)))+
+  geom_vline(xintercept = unlist(d[d$start.end == 1, "Time"]), na.rm = T)
+
+# Check in between to see which events need to be extended based on maximum gap
+
+## get a list of transitions
+transition <- base::which(d$start.end == 2)
+## reduce to evens since we're only interested in extending events, so we can ignore the start of events
+#transition <- transition[seq_along(transition)%%2 == 0]
+
+
+### ####
+for (i in seq_along(transition)){
+  print(i)
+print(d[transition[i], ])
+
+as.numeric(d[transition[i], "Time"])
+# find the last value in gap which is above threshold
+event.threshold.vector <- 
+  d[d$Time >= as.numeric(d[transition[i], "Time"])&
+    d$Time <  as.numeric(d[transition[i], "Time"])+max.gap, "IN9.dVdT.thresh"] %>% unlist()
+
+event.time.vector <- 
+  d[d$Time >= as.numeric(d[transition[i], "Time"])&
+    d$Time <  as.numeric(d[transition[i], "Time"])+max.gap, "Time"] %>% unlist()
+
+last.above.threshold <- base::which(event.threshold.vector[!is.infinite(event.threshold.vector)] == T) %>% max(., na.rm = T)
+
+new.event.end.time <- event.time.vector[last.above.threshold]
+
+# new event end time threshold value becomes 2 since it's now an end and everything inbetween becomes 3
+d[seq((transition[i]+1),
+      (transition[i] + last.above.threshold)), "start.end"] <- 3
+#d[(transition[i] + last.above.threshold-1), "start.end"] <- 2
+
+
+# if we haven't exceeded the next transition time run again, if we have stop
+}
+
+##
+d[d$start.end >= 2, "start.end"] <- 3
+
+
+ggplot(d)+
+  geom_line(aes(x = Time, y = abs(IN9.dVdT)))+
+  geom_point(aes(x = Time, y = abs(IN9.dVdT), color = as.factor(start.end)))+
+  geom_vline(xintercept = unlist(d[d$start.end == 1, "Time"]), na.rm = T)
+
+
+
+
+
+```
+
+```{r}
+
+
+
+# ggplot(df)+
+#   geom_line(aes(x = Time, y = abs(IN9.dVdT)))+
+#   geom_point(aes(x = Time, y = abs(IN9.dVdT), color = as.factor(assignment.vector)))
+  # geom_vline(xintercept = unlist(df[df$start.end == 1, "Time"]), na.rm = T)
+```
+
+```{r}
+d <- full_join(d, return_dVdT(df = d,
+                        channel = "IN4",
+                        time.channel = "Time",
+                        time.step = 0.05,
+                        dVdT.channel.name = "IN4.dVdT"))
+
+d <- full_join(d, return_dVdT(df = d,
+                        channel = "IN9",
+                        time.channel = "Time",
+                        time.step = 0.05,
+                        dVdT.channel.name = "IN9.dVdT"))
+
+d <- full_join(d, mk_burst(df = d,
+                           # channel = "IN4",
+                           time.channel = "Time",
+                           dVdT.channel.name = "IN4.dVdT",
+                           
+                           dVdT.thresh = 5,
+                           max.gap = 0.5,
+                           event.channel.name = "IN4.Bursts"))
+
+d <- full_join(d, mk_burst(df = d,
+                           # channel = "IN9",
+                           time.channel = "Time",
+                           dVdT.channel.name = "IN9.dVdT",
+                           
+                           dVdT.thresh = 5,
+                           max.gap = 0.5,
+                           event.channel.name = "IN9.Bursts"))
+
+
+```
+
+
+### Reality check: Confirm annotations are working
+```{r eval=FALSE, include=FALSE}
+
+ggplot(d[,])+
+  geom_line(aes(x = Time, y = IN4, color = IN4.Bursts, group = 1))+
+  geom_point(data = d[d$IN4.Bursts %in% c("Start", "End"),], aes(x = Time, y = IN4, color = IN4.Bursts), size = 2)+
+  geom_line(aes(x = Time, y = IN9, color = IN9.Bursts, group = 1))+
+  geom_point(data = d[d$IN9.Bursts %in% c("Start", "End"),], aes(x = Time, y = IN9, color = IN9.Bursts), size = 2)+
+  ggsci::scale_color_d3()
+  
+
+
+```
+
+
+### Reality check: Correlations with pooled bursts
+```{r eval=FALSE, include=FALSE}
+cowplot::plot_grid(plotlist = list(
+
+ggplot(d[,])+
+  geom_path(aes(x = IN4, y = IN9, color = IN4.Bursts, group = 1))+
+  geom_point(data = d[d$IN4.Bursts %in% c("Start", "End"),], aes(x = IN4, y = IN9, color = IN4.Bursts), size = 2)+
+  labs(title = paste("Spearman = ", as.character(round(cor(x = d$IN4, y = d$IN9, method = c("spearman")), digits = 3))))+
+  ggsci::scale_color_d3(),
+
+ggplot(d[,])+
+  geom_path(aes(x = IN4, y = IN9, color = IN9.Bursts, group = 1))+
+  geom_point(data = d[d$IN9.Bursts %in% c("Start", "End"),], aes(x = IN4, y = IN9, color = IN9.Bursts), size = 2)+
+  labs(title = paste("Spearman = ", as.character(round(cor(x = d$IN4, y = d$IN9, method = c("spearman")), digits = 3))))+
+  ggsci::scale_color_d3(),
+
+# IN4 bursts
+ggplot(d[d$IN4.Bursts == "Event",])+
+  geom_path(aes(x = IN4, y = IN9, color = IN4.Bursts, group = 1))+
+  geom_point(data = d[d$IN4.Bursts %in% c("Start", "End"),], aes(x = IN4, y = IN9, color = IN4.Bursts), size = 2)+
+  labs(title = paste("Spearman = ", as.character(round(cor(x = d[d$IN4.Bursts == "Event", "IN4"], y = d[d$IN4.Bursts == "Event", "IN9"], method = c("spearman")), digits = 3))))+
+  ggsci::scale_color_d3(),
+
+ggplot(d[d$IN4.Bursts == "Event",])+
+  geom_path(aes(x = IN4, y = IN9, color = IN9.Bursts, group = 1))+
+  geom_point(data = d[d$IN9.Bursts %in% c("Start", "End"),], aes(x = IN4, y = IN9, color = IN9.Bursts), size = 2)+
+  labs(title = paste("Spearman = ", as.character(round(cor(x = d[d$IN4.Bursts == "Event", "IN4"], y = d[d$IN4.Bursts == "Event", "IN9"], method = c("spearman")), digits = 3))))+
+  ggsci::scale_color_d3(),
+
+# IN9 bursts
+ggplot(d[d$IN9.Bursts == "Event",])+
+  geom_path(aes(x = IN4, y = IN9, color = IN4.Bursts, group = 1))+
+  geom_point(data = d[d$IN4.Bursts %in% c("Start", "End"),], aes(x = IN4, y = IN9, color = IN4.Bursts), size = 2)+
+  labs(title = paste("Spearman = ", as.character(round(cor(x = d[d$IN9.Bursts == "Event", "IN4"], y = d[d$IN9.Bursts == "Event", "IN9"], method = c("spearman")), digits = 3))))+
+  ggsci::scale_color_d3(),
+
+
+ggplot(d[d$IN9.Bursts == "Event",])+
+  geom_path(aes(x = IN4, y = IN9, color = IN9.Bursts, group = 1))+
+  geom_point(data = d[d$IN9.Bursts %in% c("Start", "End"),], aes(x = IN4, y = IN9, color = IN9.Bursts), size = 2)+
+  labs(title = paste("Spearman = ", as.character(round(cor(x = d[d$IN9.Bursts == "Event", "IN4"], y = d[d$IN9.Bursts == "Event", "IN9"], method = c("spearman")), digits = 3))))+
+  ggsci::scale_color_d3()
+
+
+), ncol = 2, labels = c("IN4", "IN9",
+                        "IN4 Bursts", "",
+                        "IN9 Bursts", ""))
+
+
+```
+
+
+
+### V vs dVdT plot
+```{r eval=FALSE, include=FALSE}
+ggplot(d[, ], aes(x = IN9, y = IN9.dVdT, color = Time))+
+  geom_path()+
+  geom_point()+
+  ggthemes::scale_color_continuous_tableau()
+  
+
+
+```
+
+
+## Get phase for each burst and and R^{2}
+```{r}
+
+
+
+
+# temp <- solve_delay_period_phase()
+# hist(temp$IN9.IN4.Delay)
+# hist(temp$IN9.IN4.Phase)
+# hist(temp$IN9.IN4.Period)
+
+```
+
+
+```{r}
+d <- full_join(d, solve_delay_period_phase(df = d,
+                                           time.channel = "Time",
+                                           ref.event.channel = "IN4.Bursts",
+                                           contrast.event.channel = "IN9.Bursts",
+                                           relevant.feature = "Start", # or "End"
+                                           output.channel.prefix = "IN4.IN9"))
+
+d <- full_join(d, solve_delay_period_phase(df = d,
+                                           time.channel = "Time",
+                                           ref.event.channel = "IN9.Bursts",
+                                           contrast.event.channel = "IN4.Bursts",
+                                           relevant.feature = "Start", # or "End"
+                                           output.channel.prefix = "IN9.IN4"))
+```
+
+
+### Reality check: Are Delay, Period, and Phase approximately correct?
+```{r eval=FALSE, include=FALSE}
+cowplot::plot_grid(plotlist = list(
+
+ggplot(d[,])+
+  geom_line(aes(x = Time, y = IN4, color = IN4.IN9.Delay, group = 1))+
+  geom_line(aes(x = Time, y = IN9, color = IN4.IN9.Delay, group = 1)),
+
+ggplot(d[,])+
+  geom_line(aes(x = Time, y = IN4, color = IN9.IN4.Delay, group = 1))+
+  geom_line(aes(x = Time, y = IN9, color = IN9.IN4.Delay, group = 1)),
+
+
+ggplot(d[,])+
+  geom_line(aes(x = Time, y = IN4, color = IN4.IN9.Period, group = 1))+
+  geom_line(aes(x = Time, y = IN9, color = IN4.IN9.Period, group = 1)),
+
+ggplot(d[,])+
+  geom_line(aes(x = Time, y = IN4, color = IN9.IN4.Period, group = 1))+
+  geom_line(aes(x = Time, y = IN9, color = IN9.IN4.Period, group = 1)),
+
+
+ggplot(d[,])+
+  geom_line(aes(x = Time, y = IN4, color = IN4.IN9.Phase, group = 1))+
+  geom_line(aes(x = Time, y = IN9, color = IN4.IN9.Phase, group = 1)),
+
+ggplot(d[,])+
+  geom_line(aes(x = Time, y = IN4, color = IN9.IN4.Phase, group = 1))+
+  geom_line(aes(x = Time, y = IN9, color = IN9.IN4.Phase, group = 1))
+  
+), ncol = 2, nrow = 3)
+```
+
+
+## Get within burst correlation
+```{r}
+
+```
+
+
+```{r}
+d <- full_join(d, return_within_event_cor(df = d,
+                                  time.channel = "Time",
+                                  ref.channel = "IN4",
+                                  contrast.channel = "IN9",
+                                  event.channel = "IN4.Bursts",
+                                  start.feature = "Start",
+                                  event.feature = "Event",
+                                  cor.channel.name = "IN4.Corr",
+                                  correlation.method = "pearson" # c("pearson", "kendall", "spearman")
+                                  ))
+
+d <- full_join(d, return_within_event_cor(df = d,
+                                  time.channel = "Time",
+                                  ref.channel = "IN9",
+                                  contrast.channel = "IN4",
+                                  event.channel = "IN9.Bursts",
+                                  start.feature = "Start",
+                                  event.feature = "Event",
+                                  cor.channel.name = "IN9.Corr",
+                                  correlation.method = "pearson" # c("pearson", "kendall", "spearman")
+                                  ))
+```
+
+### Reality check: Does event.feature alter output??
+```{r  eval=FALSE, include=FALSE}
+d <- full_join(d, return_within_event_cor(df = d,
+                                  time.channel = "Time",
+                                  ref.channel = "IN4",
+                                  contrast.channel = "IN9",
+                                  event.channel = "IN4.Bursts",
+                                  start.feature = "Start",
+                                  event.feature = "All",
+                                  cor.channel.name = "IN4.Corr.All",
+                                  correlation.method = "pearson" # c("pearson", "kendall", "spearman")
+                                  ))
+
+d <- full_join(d, return_within_event_cor(df = d,
+                                  time.channel = "Time",
+                                  ref.channel = "IN9",
+                                  contrast.channel = "IN4",
+                                  event.channel = "IN9.Bursts",
+                                  start.feature = "Start",
+                                  event.feature = "All",
+                                  cor.channel.name = "IN9.Corr.All",
+                                  correlation.method = "pearson" # c("pearson", "kendall", "spearman")
+                                  ))
+
+
+cowplot::plot_grid(plotlist = list(
+ggplot(d, aes(x = IN4.IN9.Phase, y = IN4.Corr))+
+  geom_point()+
+  coord_cartesian(ylim = c(-1,1)),
+
+ggplot(d, aes(x = IN9.IN4.Phase, y = IN9.Corr))+
+  geom_point()+
+  coord_cartesian(ylim = c(-1,1)),
+
+ggplot(d, aes(x = IN4.IN9.Phase, y = IN4.Corr.All))+
+  geom_point()+
+  coord_cartesian(ylim = c(-1,1)),
+
+ggplot(d, aes(x = IN9.IN4.Phase, y = IN9.Corr.All))+
+  geom_point()+
+  coord_cartesian(ylim = c(-1,1))
+))
+```
+
+
+## Testing with a single experiment
+
+```{r eval=FALSE, include=FALSE}
+#install.packages("readABF")
+test <- readABF::readABF(file = "S:/Data_Daniel/ActiveProjects/181015_electrical_synapses_voltage_modification/experiments/180117_inverted_wave/raw/180125_0075.abf")
+
+#plot(test)
+
+plot(x = 1:80003,
+y = test$data[[1]][, 1],
+type = "l")
+
+
+
+```
+
+
+```{r eval=FALSE, include=FALSE}
+
+tic <- Sys.time()
+
+trace <- readABF::readABF(file = "S:/Data_Daniel/ActiveProjects/181015_electrical_synapses_voltage_modification/190411_0034.abf")
+
+# plot(trace)
+
+
+
+plot(x = seq(from = trace$header$lFileStartTime, 
+             to = trace$header$recTime[2], 
+             length.out = 1500000),
+             #by = trace$samplingIntervalInSec), 
+     y = trace$data[[1]][, 1],
+     type = "l")
+
+
+
+print(Sys.time() - tic)
+```
+
+
+```{r}
+library(readABF)
+
+
+
+```
+
+
+# Reality check: Using a known end point (voltage clamp files) can we derive the expected results?
+```{r eval=FALSE, include=FALSE}
+
+
+protocol_records <- c(
+# 0
+"S:/Data_Daniel/ActiveProjects/181015_electrical_synapses_voltage_modification/experiments/180507_replicate_0/raw/180509_0044.abf",
+
+# 22.5
+"S:/Data_Daniel/ActiveProjects/181015_electrical_synapses_voltage_modification/experiments/180207_phase_shift_reorganized/raw/181001_0012.abf",
+
+# 45
+"S:/Data_Daniel/ActiveProjects/181015_electrical_synapses_voltage_modification/experiments/180411_replicate_45/raw/180625_0022.abf",
+
+# 90
+"S:/Data_Daniel/ActiveProjects/181015_electrical_synapses_voltage_modification/experiments/190319_common_waveform_90/190408_0026.abf",
+
+#TEA
+"S:/Data_Daniel/ActiveProjects/181015_electrical_synapses_voltage_modification/experiments/180205_TEA_wave_in_control/raw/180223_0064.abf",
+
+# TEA_22.5
+"S:/Data_Daniel/ActiveProjects/181015_electrical_synapses_voltage_modification/experiments/180521_TEA_wave_22_deg/raw/180615_0029.abf",
+
+# inverted
+"S:/Data_Daniel/ActiveProjects/181015_electrical_synapses_voltage_modification/experiments/180117_inverted_wave/raw/180205_0061.abf"
+)
+
+traces <- purrr::map(protocol_records, function(i){
+  load_ABF_as_matrix(path = i)
+})
+```
+
+
+```{r eval=FALSE, include=FALSE}
+# library(janitor)
+dim(d)
+
+i=2
+my.plots <- purrr::map(seq_along(traces), function(i){
+d <- traces[[i]] %>% as.data.frame()
+
+names(d) <- c("IN4", "IN9", "Time")
+
+# #Because we throw away the last burst, we must repeat the data
+d <- rbind(d, d)
+time.interval <- d[2, "Time"] - d[1, "Time"]
+d$Time <- seq(from = 0, by = time.interval, length.out = nrow(d))
+
+
+d <- full_join(d, return_dVdT(df = d,
+                        channel = "IN4",
+                        time.channel = "Time",
+                        time.step = 0.05,
+                        dVdT.channel.name = "IN4.dVdT"))
+
+d <- full_join(d, return_dVdT(df = d,
+                        channel = "IN9",
+                        time.channel = "Time",
+                        time.step = 0.05,
+                        dVdT.channel.name = "IN9.dVdT"))
+
+# ggplot(d[round(seq(1, to = nrow(d), length.out = 10000), digits = 0), ])+
+#   geom_line(aes(x = Time, y = IN4.dVdT), color = "red")+
+#   geom_line(aes(x = Time, y = IN9.dVdT), color = "blue")
+
+
+d <- full_join(d, mk_burst(df = d,
+                           # channel = "IN4",
+                           time.channel = "Time",
+                           dVdT.channel.name = "IN4.dVdT",
+                           
+                           dVdT.thresh = 15,
+                           max.gap = 0.5,
+                           event.channel.name = "IN4.Bursts"))
+
+d <- full_join(d, mk_burst(df = d,
+                           # channel = "IN9",
+                           time.channel = "Time",
+                           dVdT.channel.name = "IN9.dVdT",
+                           
+                           dVdT.thresh = 15,
+                           max.gap = 0.5,
+                           event.channel.name = "IN9.Bursts"))
+
+# ggplot(d[round(seq(1, to = nrow(d), length.out = 10000), digits = 0), ])+
+#   geom_point(aes(x = Time, y = IN4, color = IN4.Bursts))+
+#   geom_point(aes(x = Time, y = IN9, color = IN9.Bursts))
+
+
+d <- full_join(d, solve_delay_period_phase(df = d,
+                                           time.channel = "Time",
+                                           ref.event.channel = "IN4.Bursts",
+                                           contrast.event.channel = "IN9.Bursts",
+                                           relevant.feature = "Start", # or "End"
+                                           output.channel.prefix = "IN4.IN9"))
+
+d <- full_join(d, solve_delay_period_phase(df = d,
+                                           time.channel = "Time",
+                                           ref.event.channel = "IN9.Bursts",
+                                           contrast.event.channel = "IN4.Bursts",
+                                           relevant.feature = "Start", # or "End"
+                                           output.channel.prefix = "IN9.IN4"))
+
+# ggplot(d[round(seq(1, to = nrow(d), length.out = 10000), digits = 0), ])+
+#   geom_path(aes(x = Time, y = IN4, color = as.factor(1/IN4.IN9.Phase)))+
+#   geom_path(aes(x = Time, y = IN9, color = as.factor(1/IN9.IN4.Phase)))+
+#   xlim(0, 3)
+
+
+d <- full_join(d, return_within_event_cor(df = d,
+                                  time.channel = "Time",
+                                  ref.channel = "IN4",
+                                  contrast.channel = "IN9",
+                                  event.channel = "IN4.Bursts",
+                                  start.feature = "Start",
+                                  event.feature = "Event",
+                                  cor.channel.name = "IN4.Corr",
+                                  correlation.method = "pearson" # c("pearson", "kendall", "spearman")
+                                  ))
+
+d <- full_join(d, return_within_event_cor(df = d,
+                                  time.channel = "Time",
+                                  ref.channel = "IN9",
+                                  contrast.channel = "IN4",
+                                  event.channel = "IN9.Bursts",
+                                  start.feature = "Start",
+                                  event.feature = "Event",
+                                  cor.channel.name = "IN9.Corr",
+                                  correlation.method = "pearson" # c("pearson", "kendall", "spearman")
+                                  ))
+
+
+d <- full_join(d, return_within_event_cor(df = d,
+                                  time.channel = "Time",
+                                  ref.channel = "IN4",
+                                  contrast.channel = "IN9",
+                                  event.channel = "IN4.Bursts",
+                                  start.feature = "Start",
+                                  event.feature = "All",
+                                  cor.channel.name = "IN4.Corr.All",
+                                  correlation.method = "pearson" # c("pearson", "kendall", "spearman")
+                                  ))
+
+d <- full_join(d, return_within_event_cor(df = d,
+                                  time.channel = "Time",
+                                  ref.channel = "IN9",
+                                  contrast.channel = "IN4",
+                                  event.channel = "IN9.Bursts",
+                                  start.feature = "Start",
+                                  event.feature = "All",
+                                  cor.channel.name = "IN9.Corr.All",
+                                  correlation.method = "pearson" # c("pearson", "kendall", "spearman")
+                                  ))
+
+# "IN4"            "IN9"            "Time"           "IN4.dVdT"       "IN9.dVdT"      
+# "IN4.Bursts"     "IN9.Bursts"     "IN4.IN9.Delay"  "IN4.IN9.Period" "IN4.IN9.Phase" 
+# "IN9.IN4.Delay"  "IN9.IN4.Period" "IN9.IN4.Phase"  "IN4.Corr"       "IN9.Corr"    
+
+#TODO work with 22 deg data (or another of the known phases) and get this to recapitulate the known end point
+#TODO May need to redo the function that calculates phase to get it operational
+
+plts <- cowplot::plot_grid(plotlist = list(
+
+ggplot(d[round(seq(1, to = nrow(d), length.out = 1000), digits = 0), ])+
+  geom_path(aes(x = Time, y = IN4, color = as.factor(round((1/IN4.IN9.Phase), digits = 3))))+
+  geom_path(aes(x = Time, y = IN9, color = as.factor(round((1/IN9.IN4.Phase), digits = 3))))+
+  theme(legend.position = "bottom")+
+  labs(x = "")+
+  xlim(0, 3),
+
+ggplot(d[round(seq(1, to = nrow(d), length.out = 1000), digits = 0), ])+
+  geom_path(aes(x = Time, y = IN4, color = as.factor(round(IN4.Corr, digits = 3)), group = 1))+
+  geom_path(aes(x = Time, y = IN9, color = as.factor(round(IN9.Corr, digits = 3)), group = 1))+
+  theme(legend.position = "bottom")+
+  labs(x = "")+
+  xlim(0, 3),
+
+ggplot(d[round(seq(1, to = nrow(d), length.out = 1000), digits = 0), ])+
+  geom_path(aes(x = Time, y = IN4, color = as.factor(round(IN4.Corr.All, digits = 3)), group = 1))+
+  geom_path(aes(x = Time, y = IN9, color = as.factor(round(IN9.Corr.All, digits = 3)), group = 1))+
+  theme(legend.position = "bottom")+
+  labs(x = "")+
+  xlim(0, 3)
+
+), ncol = 1)
+
+return(plts)
+})
+
+```
+
+```{r eval=FALSE, include=FALSE}
+walk(seq_along(my.plots), function(i){
+  ggsave(paste0("plt", as.character(i), ".tiff"), plot = my.plots[[i]], path = "C:/Users/drk8b9/Desktop/rm_output/")
+})
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+# Discarded
+
+```{r eval=FALSE, include=FALSE}
+# backup <- d
+d <- backup
+```
+
+
+```{r eval=FALSE, include=FALSE}
+
+
+
+
+
+# ggplot(d[d$Time>8 &
+#            d$Time<11, ], aes(x = Time, y = event2, color = event2))+
+#   geom_point()+
+#   geom_line(aes(x = Time, y = IN9+40))+
+#   geom_hline(yintercept = -35+40)
+# 
+# d[d$Time>2 &
+#            d$Time<5, "event2"] %>% unique()
+# # Make Bursts
+# # DlgCreate ("Find bursts");						'creates dialog to assign channels, the maximum interval spikes are allowed to have to still
+# # DlgChan (1,"Input channel", 2);				'belong to one burst and the minimum number of spikes that can make up a burst. maximum interval
+# # DlgChan (2, "Output channel", 128);			'can be set seperately for the first two spikes in a burst.
+# # DlgString (3, "Name of new channel", 20);
+# # DlgReal (4, "Maximum spike interval", 0,100);
+# # DlgReal (5, "Maximum spike interval for first 2 events", 0,100);
+# # DlgReal (6, "Minimum number of events", 2,100);
+# # DlgReal (7, "Minimum burst duration", 0, 100);
+# # DlgCheck(8,"allow single spike bursts");
+# 
+# max.spike.interval <- 1
+# max.spike.interval.first2 <- 1
+# min.num.events <- 2
+# min.burst.duration <- 0.1
+# allow.single.spikes <- F
+# 
+# 
+# 
+# 
+# 
+# # Burst Statistics
+# # 'The values printed to the log window are:
+# # 
+# # '"burst": this numbers the bursts from 1 to n. can be corrected by adding or substracting after checking the box in the dialog.
+# # 'maybe useful if your file is one of a series of files from the same experiment. again, keep in mind that the last burst of the
+# # 'last data file was omitted! you may want to add the number of the last burst in the last data file +1!
+# # 
+# # '"startT [s]": this gives the absolute start time of every burst, based on the time base of the data file.
+# # 
+# # '"endT [s]": this gives the absolute end time of every burst, based on the time base of the data file.
+# # 
+# # '"relative startT [s]": this, by default, substracts the time value of cursor 1 (if present) from the absolute time, so your
+# # 'analysis starts at 0. if you check the box in the dialog you can add or substract to match the time code of a preceeding or
+# # 'following data file from the same experiment.
+# # 
+# # '"relative endT [s]": see above.
+# # 
+# # '"cycle period [s]": returns time from one burst start to the next.
+# # 
+# # '"inst burstfreq [Hz]": inverse of the cycle period.
+# # 
+# # '"duration [s]": returns time from burst start to burst end.
+# # 
+# # '"dutycycle": returns duration/cycle period.
+# # 
+# # '"#spikes": counts the number of spikes within a burst.
+# # 
+# # '"spikefreq in burst [Hz]": returns #spikes/duration.
+# # 
+# # 'filename, channel assignments and start and end times are printed as a header. you may want to delete them before saving as text and
+# # 'importing into a statistics or plot program.
+# # 
+# # 'dirk bucher, january 2002.
+# # 'bug fix 06/09/03	--> spkfreq in burst is now calculated as nspk-1/dur
+
+```
+
+
+## working off of extracellular
+
+```{r eval=FALSE, include=FALSE}
+ggplot(d)+
+  geom_line(aes(x = Time, y = IN14), color = "steelblue")+
+  geom_line(aes(x = Time, y = IN15), color = "firebrick")
+
+
+```
+
+

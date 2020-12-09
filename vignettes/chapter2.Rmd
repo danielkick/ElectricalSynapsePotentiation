@@ -1,0 +1,2174 @@
+---
+title: 'Chapter 2: Transjunctional voltage is responsible for activity dependent gap
+  junction modulation'
+author: "Daniel R. Kick"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library("tidyverse") # Plotting and data manipulation
+library("cowplot") # clean up ggplots, plotgrid
+library("ggthemes")
+library("nlme") # for nested anova via lme. See http://www.jason-french.com/tutorials/repeatedmeasures.html
+library("multcomp")
+library("lemon")
+
+library("ggthemes")
+library("ggsci")
+library("car")
+```
+
+#global todo
+```{r}
+# TODO Change all the file = paste0(working.dir, "/data/tecc.rds") to file = paste0("./data/tecc.rds")
+# TODO 
+```
+
+
+# Custom functions
+```{r}
+## Reduce the multiple observations (for passive property data) into a single measurement of tecc/tevc per LC ====
+collapse_duplicate_gj_obs <- function(input.df) {
+  input.df$keep <- TRUE
+
+  ref.input.df <- input.df %>% group_by(Experiment, Time, Inj_Cell) %>% tally()
+  ref.input.df <- ref.input.df[ref.input.df$n > 1, ]
+
+  for (i in seq(from = 1, to = nrow(ref.input.df))) {
+    choose <- input.df[input.df$Experiment == as.character(ref.input.df[i, "Experiment"]) &
+      input.df$Time == as.double(ref.input.df[i, "Time"]) &
+      input.df$Inj_Cell == as.character(ref.input.df[i, "Inj_Cell"]), 2] %>% min()
+
+    input.df[input.df$Experiment == as.character(ref.input.df[i, "Experiment"]) &
+      input.df$Time == as.double(ref.input.df[i, "Time"]) &
+      input.df$Inj_Cell == as.character(ref.input.df[i, "Inj_Cell"]) &
+      input.df[, 2] != choose, "keep"] <- FALSE
+  }
+
+  input.df <- input.df[input.df$keep == TRUE, ]
+  input.df <- input.df[!is.na(input.df$Experiment), !(names(input.df) %in% c("keep"))]
+  return(input.df)
+}
+
+collapse_duplicate_current_obs <- function(input.df = htk.p,
+                                           target.mV = 0,
+                                           prefer.pn = "online", # online selects online p/n before manual (Only makes a difference for htk).
+                                           prefer.recording = "lowest", # lowest selects the lowerst recording number. Hightest selects the hightest recording number.
+                                           deduplicate = "closest" # of remaining values, select the one with mV closest to 0mV
+
+) {
+  if (TRUE == FALSE) {
+    # This exists for debugging alone
+    input.df <- htk.p
+    target.mV <- 0
+    prefer.pn <- "online"
+    prefer.recording <- "lowest"
+    deduplicate <- "closest"
+  }
+
+  round.bool <- (10 * round(input.df[, 6] / 10)) == target.mV
+  # retain values closest to zero
+  input.df <- input.df[round.bool, ]
+  input.df <- input.df[!is.na(input.df$Experiment), ]
+  # create distance from 0mV col to aid in choosing the best guess for 0mV
+  input.df <- input.df %>% mutate(dist = abs(input.df[, 6] - target.mV))
+  input.df$keep <- TRUE
+  # if there are two zeroes, find them
+  get_duplicate_obs <- function(input.df) {
+    ref.df <- input.df %>% group_by(Experiment, Time, Inj_Cell) %>% tally()
+    ref.df <- ref.df[ref.df$n > 1, ]
+    return(ref.df)
+  }
+  ref.df <- get_duplicate_obs(input.df)
+
+## Here we use the "keep" col defined previously to choose between duplicate observatoins
+  
+  if (prefer.pn == "online") {
+    # select the value with the lowest
+    print("retaining the online recordings")
+    for (i in seq(from = 1, to = nrow(ref.df), by = 1)) {
+      if (sum(input.df[input.df$Experiment == as.character(ref.df[i, "Experiment"]) &
+        input.df$Time == as.double(ref.df[i, "Time"]) &
+        input.df$Inj_Cell == as.character(ref.df[i, "Inj_Cell"]), "subtracted.rin"] == "NA") != 0) {
+        #print(i)
+        
+        input.df[input.df$Experiment == as.character(ref.df[i, "Experiment"]) &
+          input.df$Time == as.double(ref.df[i, "Time"]) &
+          input.df$Inj_Cell == as.character(ref.df[i, "Inj_Cell"]) &
+          input.df$subtracted.rin != "NA", "keep"] <- FALSE
+      }
+    }
+    input.df <- input.df[input.df$keep == TRUE, ]
+    input.df <- input.df[!is.na(input.df$Experiment), ]
+    # refresh ref.df after each winnowing
+    ref.df <- get_duplicate_obs(input.df)
+  }
+  
+  if (prefer.recording == "lowest") {
+    # select the value with the lowest
+    print("retaining the lowest recording number")
+    for (i in seq(from = 1, to = nrow(ref.df), by = 1)) {
+      #print(i)
+      choose <- input.df[input.df$Experiment == as.character(ref.df[i, "Experiment"]) &
+        input.df$Time == as.double(ref.df[i, "Time"]) &
+        input.df$Inj_Cell == as.character(ref.df[i, "Inj_Cell"]), 2] %>% min(na.rm = TRUE)
+
+      input.df[input.df$Experiment == as.character(ref.df[i, "Experiment"]) &
+        input.df$Time == as.double(ref.df[i, "Time"]) &
+        input.df$Inj_Cell == as.character(ref.df[i, "Inj_Cell"]) &
+        input.df[, 2] != choose, "keep"] <- FALSE
+    }
+    input.df <- input.df[input.df$keep == TRUE, ]
+    input.df <- input.df[!is.na(input.df$Experiment), ]
+    # refresh ref.df after each winnowing
+    ref.df <- get_duplicate_obs(input.df)
+  } else if (prefer.recording == "highest") {
+    # select the value with the highest
+    print("retaining the highest recording number")
+    for (i in seq(from = 1, to = nrow(ref.df), by = 1)) {
+      #print(i)
+      choose <- input.df[input.df$Experiment == as.character(ref.df[i, "Experiment"]) &
+        input.df$Time == as.double(ref.df[i, "Time"]) &
+        input.df$Inj_Cell == as.character(ref.df[i, "Inj_Cell"]), 2] %>% max(na.rm = TRUE)
+
+      input.df[input.df$Experiment == as.character(ref.df[i, "Experiment"]) &
+        input.df$Time == as.double(ref.df[i, "Time"]) &
+        input.df$Inj_Cell == as.character(ref.df[i, "Inj_Cell"]) &
+        input.df[, 2] != choose, "keep"] <- FALSE
+    }
+    input.df <- input.df[input.df$keep == TRUE, ]
+    input.df <- input.df[!is.na(input.df$Experiment), ]
+    # refresh ref.df after each winnowing
+    ref.df <- get_duplicate_obs(input.df)
+  }
+  
+## Here we deduplicate
+  
+  if (deduplicate == "closest") {
+    # select the value with the smallest difference from zero
+    print("retaining the closest to target")
+    for (i in seq(from = 1, to = nrow(ref.df), by = 1)) {
+      #print(i)
+      choose <- input.df[input.df$Experiment == as.character(ref.df[i, "Experiment"]) &
+        input.df$Time == as.double(ref.df[i, "Time"]) &
+        input.df$Inj_Cell == as.character(ref.df[i, "Inj_Cell"]), "dist"] %>% min(na.rm = TRUE)
+
+      input.df[input.df$Experiment == as.character(ref.df[i, "Experiment"]) &
+        input.df$Time == as.double(ref.df[i, "Time"]) &
+        input.df$Inj_Cell == as.character(ref.df[i, "Inj_Cell"]) &
+        input.df$dist != choose, "keep"] <- FALSE
+    }
+    input.df <- input.df[input.df$keep == TRUE, ]
+    input.df <- input.df[!is.na(input.df$Experiment), ]
+  }
+
+  input.df <- input.df[, !(names(input.df) %in% c("dist", "keep"))]
+  
+  return(input.df)
+}
+
+## Calculate percent change for later use: ====
+#not pretty but this'll get the job done
+convert_data_to <- function(input.df = all.data,
+                            convert.to = c("percent"), #percent, difference
+                            data.cols = c(
+                              "r11", "r12", "r1", "rc", "cc", "rmp", "gj",
+                              "htk.peak.mV", "htk.peak.nA", "htk.end.mV", "htk.end.nA",
+                              "a.peak.mV", "a.peak.nA", "a.end.mV", "a.end.nA"
+                            )) {
+  input.df <- input.df[!duplicated(input.df), ]
+  input.df$inter <- interaction(input.df$Experiment, input.df$Inj_Cell)
+  inters <- input.df$inter %>% unique()
+
+  if (convert.to == "difference") {
+    for (i in seq_along(inters)) {
+      for (j in seq_along(data.cols)) {
+        input.df[input.df$inter == inters[i], data.cols[j]] <- (input.df[input.df$inter == inters[i], data.cols[j]] - input.df[input.df$inter == inters[i] & input.df$Time == 0, data.cols[j]])
+      }
+    }
+  }
+  if (convert.to == "percent") {
+    for (i in seq_along(inters)) {
+      for (j in seq_along(data.cols)) {
+        input.df[input.df$inter == inters[i], data.cols[j]] <- ((input.df[input.df$inter == inters[i], data.cols[j]] - input.df[input.df$inter == inters[i] & input.df$Time == 0, data.cols[j]])
+                                                                / input.df[input.df$inter == inters[i] & input.df$Time == 0, data.cols[j]])*100 #This has been changed to percent difference
+      }
+    }
+  }
+  return(input.df)
+}
+
+
+## Deduplicate gap junction measurements ====
+# Make versions of the dfs that have only one value for the gap junction measurements
+deduplicate_gj_obs <- function(input.df = M.d) {
+  input.df[, "obs"] <- interaction(input.df$Experiment, input.df$Time)
+  uniq.obs <- unique(input.df$obs)
+  for (i in 1:length(uniq.obs)) {
+    input.df[input.df$obs == uniq.obs[[i]], "rc"] <- mean(input.df[input.df$obs == uniq.obs[[i]], "rc"], na.rm = T)
+    input.df[input.df$obs == uniq.obs[[i]], "gj"] <- mean(input.df[input.df$obs == uniq.obs[[i]], "gj"], na.rm = T)
+  }
+  input.df <- input.df[!duplicated(input.df$obs), ]
+  return(input.df)
+}
+```
+
+```{r resampling fcns}
+run_standardized_lme_Phase <- function(response.var = "cc",
+                                 input.df = M[M$Condition %in% c("PS.0", "PS.22", "PS.45", "PS.90"), ],
+                                 mute.time = FALSE) {
+  tic <- Sys.time()
+
+  # Transform the data so that it's ready for the test
+  input.df <- input.df[!(is.na(input.df[[response.var]])), ]
+  input.df$response.var <- input.df[[response.var]]
+  # input.df$Time <- as.factor(input.df$Time)
+  input.df$interact <- interaction(input.df$Experiment, input.df$Inj_Cell)
+
+  input.df$Phase <- "None"
+  
+  input.df[input.df$Condition %in% c("PS.0"),  "Phase"] <- "0"
+  input.df[input.df$Condition %in% c("PS.22"), "Phase"] <- "22"
+  input.df[input.df$Condition %in% c("PS.45"), "Phase"] <- "45"
+  input.df[input.df$Condition %in% c("PS.90"), "Phase"] <- "90"
+  
+
+  input.df <- input.df[, c("response.var", "interact", "Time", "Phase"
+                           # , "Amp"
+                           )]
+
+  # First model with observed data
+  fm <- lme(response.var ~ Time * Phase, random = ~1 | interact, method = "ML", data = input.df)
+  stats.table <- anova.lme(fm)
+
+  toc <- Sys.time()
+
+  if (mute.time != TRUE){
+    print(toc - tic)
+  }
+  return(stats.table)
+}
+
+run_standardized_lme_resample_Phase <- function(response.var = "cc",
+                                          input.df = M[M$Condition %in% c("PS.0", "PS.22", "PS.45", "PS.90"), ],
+                                          nreps = 1e4,
+                                          use.seed = 432431,
+                                          mute.completion = FALSE,
+                                          mute.time = FALSE) {
+  #for debugging
+  if (F == T){
+    response.var = "cc"
+    input.df = M[M$Condition %in% c("PS.0", "PS.22", "PS.45", "PS.90"), ]
+    nreps = 100
+    use.seed = 432431
+    mute.completion = FALSE
+    mute.time = FALSE
+  }
+  
+  
+  tic <- Sys.time()
+
+  # Transform the data so that it's ready for the test
+  input.df <- input.df[!(is.na(input.df[[response.var]])), ]
+  input.df$response.var <- input.df[[response.var]]
+  # input.df$Time <- as.factor(input.df$Time)
+  input.df$interact <- interaction(input.df$Experiment, input.df$Inj_Cell)
+
+  input.df$Phase <- "None"
+  
+  input.df[input.df$Condition %in% c("PS.0"),  "Phase"] <- "0"
+  input.df[input.df$Condition %in% c("PS.22"), "Phase"] <- "22"
+  input.df[input.df$Condition %in% c("PS.45"), "Phase"] <- "45"
+  input.df[input.df$Condition %in% c("PS.90"), "Phase"] <- "90"
+  
+
+  input.df <- input.df[, c("response.var", "interact", "Time", "Phase"
+                           # , "Amp"
+                           )]
+
+  # First model with observed data
+  fm <- lme(response.var ~ Time * Phase, random = ~1 | interact, method = "ML", data = input.df)
+  stats.table <- anova.lme(fm)
+
+  F_stats <- matrix(NA, nrow = nreps, ncol = length(stats.table$`F-value`))
+  F_stats[1, ] <- stats.table$`F-value`
+  
+  
+  set.seed(use.seed)
+  for (ii in 2:nreps) {
+    
+    if (mute.completion != TRUE){
+      print(paste0(((ii/nreps)*100), "%"))
+    }
+    rand.lme <- try(lme(sample(response.var) ~ Time * Phase, random = ~1 | interact, method = "ML", data = input.df))
+    F_stats[ii, ] <- try(anova.lme(rand.lme)$`F-value`)
+    
+    
+    # In case there is a convergence issue we immediately replace that value to get the target number of reps. 
+    while (is.na(as.numeric(F_stats[ii, 1]))) {
+      print("Replacing model with singular convergence")
+      rand.lme <- try(lme(sample(response.var) ~ Time * Phase, random = ~1 | interact, method = "ML", data = input.df))
+      F_stats[ii, ] <- try(anova.lme(rand.lme)$`F-value`)
+      
+    }
+  }
+  
+  F_stats <- as.data.frame(F_stats)
+  names(F_stats) <- rownames(stats.table)
+  
+  #Convert from factor/cha to int
+  walk(1:4, function(X){
+    F_stats[,X] <<- as.numeric(F_stats[,X])
+  })
+  toc <- Sys.time()
+  
+  if (mute.time != TRUE){
+    print(toc - tic)    
+  }
+  return(na.omit(F_stats))
+}
+
+
+```
+
+
+```{r}
+
+kickme <- function (base_size = 14,
+                    base_family = "sans")
+{
+  # colors <- deframe(ggthemes::ggthemes_data[["fivethirtyeight"]])
+  (
+    theme_foundation(base_size = base_size, base_family = base_family) +
+      theme(
+        line = element_line(colour = "azure2"),
+        rect = element_rect(
+          # fill = colors["Light Gray"],
+          fill = "transparent",
+          color = NA,
+          linetype = 0,
+          colour = NA
+        ),
+        # text = element_text(colour = colors["Dark Gray"]),
+        axis.title = element_blank(),
+        axis.text = element_text(),
+        axis.ticks = element_blank(),
+        axis.line = element_blank(),
+        legend.background = element_rect(),
+        legend.position = "bottom",
+        legend.direction = "horizontal",
+        legend.box = "vertical",
+        # panel.grid = element_line(colour = NULL),
+        # panel.grid.major = element_line(colour = colors["Medium Gray"]),
+        # panel.grid.minor = element_blank(),
+        
+        panel.background = element_rect(fill = "transparent",colour = NA),
+        plot.background = element_rect(fill = "transparent",colour = NA),
+        
+        plot.title = element_text(
+          hjust = 0,
+          size = rel(1.5),
+          face = "bold"
+        ),
+        plot.margin = unit(c(1,
+                             1, 1, 1), "lines"),
+        # strip.background = element_rect()
+        strip.background =element_rect(fill="transparent", colour =NA)
+      )
+  )
+}
+```
+
+
+
+
+
+
+
+
+
+# Read in and aggregate data 
+```{r read in data, eval=TRUE, include=FALSE}
+# Run settings ----
+resample.results = T # If not TRUE resampled model list will be loaded from a previous save
+resample.nreps <- 1e2 #FIXME
+
+# Preprocessing ----
+working.dir <- getwd()
+
+tecc <- readRDS(file = paste0(working.dir, "/data/tecc.rds"))
+tevc <- readRDS(file = paste0(working.dir, "/data/tevc.rds"))
+htk <- readRDS(file = paste0(working.dir, "/data/htk.rds"))
+a <- readRDS(file = paste0(working.dir, "/data/a.rds"))
+
+tecc <- collapse_duplicate_gj_obs(tecc)
+tevc <- collapse_duplicate_gj_obs(tevc)
+
+## Reduce ionic current observations to a single one at a given target voltage. ====
+### split into peak and end ####
+htk.p <- htk[, !(names(htk) %in% c("htk.end.mV", "htk.end.nA"))]
+htk.e <- htk[, !(names(htk) %in% c("htk.peak.mV", "htk.peak.nA"))]
+a.p <- a[, !(names(a) %in% c("a.end.mV", "a.end.nA"))]
+a.e <- a[, !(names(a) %in% c("a.peak.mV", "a.peak.nA"))]
+
+### apply to each current type and time ####
+
+
+htk.p <- collapse_duplicate_current_obs(
+  input.df = htk.p,
+  target.mV = 0,
+  prefer.pn = "online",
+  prefer.recording = "highest",
+  deduplicate = "closest"
+)
+
+htk.e <- collapse_duplicate_current_obs(
+  input.df = htk.e,
+  target.mV = 0,
+  prefer.pn = "online",
+  prefer.recording = "highest",
+  deduplicate = "closest"
+) 
+
+a.p <- collapse_duplicate_current_obs(
+  input.df = a.p,
+  target.mV = 0,
+  prefer.pn = "",
+  prefer.recording = "highest",
+  deduplicate = "closest"
+)
+
+a.e <- collapse_duplicate_current_obs(
+  input.df = a.e,
+  target.mV = 0,
+  prefer.pn = "",
+  prefer.recording = "highest",
+  deduplicate = "closest"
+)
+## Join independent data types into a single data frame ====
+
+all.data <- full_join(tecc, tevc) %>% full_join(htk.p) %>% full_join(htk.e) %>% full_join(a.p) %>% full_join(a.e)
+all.data <- all.data[, c(
+  "Condition", "Experiment", "Time", "Inj_Cell",
+  "tecc.recording", "tevc.recording", "htk.recording", "a.recording", "subtracted.rin",
+  "r11", "r12", "r1", "rc", "cc", "rmp", "gj",
+  "htk.peak.mV", "htk.peak.nA", "htk.end.mV", "htk.end.nA",
+  "a.peak.mV", "a.peak.nA", "a.end.mV", "a.end.nA"
+)]
+
+all.data <- all.data %>% as.data.frame()
+
+## Rename conditions ====
+#NOTE: this needs to be changed if new conditions are added
+
+conditions <- all.data$Condition %>% unique()
+new.conditions <- c("PS.0.High.Amp", "Inv", "PS.0", "PS.0.TEA", "Silent.TEA", "PS.22", "PS.22.High.Amp", "PS.22.orig", "PS.45", 
+                    "PS.90",
+                    "Silent.53mV",  "PS.0.orig", "PS.180.orig", "PS.90.orig", "PS.45.orig")
+
+for (i in 1:length(conditions)) {
+  all.data[all.data$Condition == conditions[i], "Condition" ] <- new.conditions[i]
+}
+
+#FIXME -- Do we really want to think about all of these?
+# remove conditions 
+#all.data <- all.data[all.data$Condition %in% c("PS.0", "PS.22", "PS.45", "PS.0.High.Amp", "PS.22.High.Amp"), ]
+
+# reorder factors
+all.data$Condition <- factor(all.data$Condition, c(
+  "PS.0", "PS.22", "PS.45", 
+  "PS.90",
+  "PS.0.High.Amp", "PS.22.High.Amp", 
+  "PS.0.orig", "PS.22.orig", "PS.45.orig", "PS.90.orig", "PS.180.orig", 
+  "PS.0.TEA", "Silent.TEA", "Inv", "Silent.53mV"
+))
+
+### NOTE: setting silent TEA to PS0TEA: ####
+#ignore silent TEA
+all.data[all.data$Condition == "Silent.TEA", "Condition"] <- "PS.0.TEA"
+
+## Drop outliers by the following rules: ====
+
+#convert gj to inverse to make it easier to work with.
+all.data$gj <- (1/all.data$gj) 
+
+### 1. Resistances can't be zero, drop any which are.  ####
+all.data[(all.data$r11 < 0) & !is.na(all.data$r11) , "r11"] <- NA
+all.data[(all.data$r1 < 0) & !is.na(all.data$r1) , "r1"] <- NA
+all.data[(all.data$rc < 0) & !is.na(all.data$rc) , "rc"] <- NA
+all.data[(all.data$gj < 0) & !is.na(all.data$gj) , "gj"] <- NA
+
+# 2. If coupling coef is less than 0 or above 1, drop it. ####
+all.data[(all.data$cc > 1 | all.data$cc < 0) & !is.na(all.data$cc) , "cc"] <- NA
+
+# for condition | time | response var
+conditions <- all.data$Condition %>% unique()
+times <- all.data$Time %>% unique()
+response.vars <- c("r11", "r1", "cc", "a.peak.nA", "htk.peak.nA", "rc", "gj")
+
+multiplier <-  2
+use.method <- "use.sd" #use.iqr
+
+tic <- Sys.time()
+for (i in seq_along(conditions)) {
+  for (j in seq_along(times)) {
+    for (k in seq_along(response.vars)) {
+      if (use.method == "use.sd") {
+        current.mean <- all.data[all.data$Condition == conditions[i] &
+          all.data$Time == times[j], response.vars[k]] %>% mean(na.rm = TRUE)
+        current.sd <- all.data[all.data$Condition == conditions[i] &
+          all.data$Time == times[j], response.vars[k]] %>% sd(na.rm = TRUE)
+
+        all.data[all.data$Condition == conditions[i] & all.data$Time == times[j] & ((all.data[[response.vars[k]]] < (current.mean - (multiplier * current.sd))) | (all.data[[response.vars[k]]] > (current.mean + (multiplier * current.sd)))) & !(is.na(all.data[[response.vars[k]]])), response.vars[k]] <- NA
+      } else if (use.method == "use.iqr") {
+        current.median <- all.data[all.data$Condition == conditions[i] &
+          all.data$Time == times[j], response.vars[k]] %>% median(na.rm = TRUE)
+        current.iqr <- all.data[all.data$Condition == conditions[i] &
+          all.data$Time == times[j], response.vars[k]] %>% IQR(na.rm = TRUE)
+
+        all.data[all.data$Condition == conditions[i] & all.data$Time == times[j] & ((all.data[[response.vars[k]]] < (current.median - (multiplier * current.iqr))) | (all.data[[response.vars[k]]] > (current.median + (multiplier * current.iqr)))) & !(is.na(all.data[[response.vars[k]]])), response.vars[k]] <- NA
+      } else {
+        warning(paste(as.character(use.method), "is not use.sd or use.iqr!"))
+      }
+    }
+  }
+}
+print(Sys.time() - tic)
+```
+
+### Reduce dataset
+```{r}
+# Get ballanced groups ----
+all.data <- all.data[(all.data$Condition == "PS.0" &
+  all.data$Experiment %in% c(
+    "180507",
+    "180509",
+    "180509a",
+    "180510",
+    "180514"
+  )) |
+  all.data$Condition != "PS.0", ]
+
+all.data <- all.data[(all.data$Condition == "PS.22" &
+  all.data$Experiment %in% c(
+    "180315", 
+    "180314", 
+    "180309", #real high
+    # "180308", #real low, t=0 measures furthest apart
+    "180705", 
+    "181001"
+  )) |
+  all.data$Condition != "PS.22", ]
+
+all.data <- all.data[(all.data$Condition == "PS.45" &
+  all.data$Experiment %in% c(
+    "180413",  
+    "180425",  
+    "180622",  
+    "180625",  
+    "190404a"
+  )) |
+  all.data$Condition != "PS.45", ]
+
+all.data <- all.data[(all.data$Condition == "PS.90" &
+  all.data$Experiment %in% c(
+    "190319", 
+    "190319a", 
+    "190322",  
+    "190322a", 
+    "190404"
+  )) |
+  all.data$Condition != "PS.90", ]
+
+all.data <- all.data[(all.data$Condition == "PS.22.High.Amp" &
+  all.data$Experiment %in% c(
+    "180604", 
+    "180607", 
+    "180615", 
+    "180530", 
+    "180531"
+  )) |
+  all.data$Condition != "PS.22.High.Amp", ]
+
+all.data <- all.data[(all.data$Condition == "PS.0.High.Amp" &
+  all.data$Experiment %in% c(
+   "180221",  
+    "180221a", 
+    #"180212",  
+    "180214",  
+    "181019",  
+    "180223"
+  )) |
+  all.data$Condition != "PS.0.High.Amp", ]
+
+
+# PS.0
+# "180507",
+# "180509",
+# "180509a",
+# "180510",
+# "180514"
+
+# PS.22
+# "180315", 
+# "180314", 
+# "180309", #real high
+# # "180308", #real low, t=0 measures furthest apart
+# "180705", 
+# "181001"
+
+# PS.45
+# "180413",  
+# "180425",  
+# "180622",  
+# "180625",  
+# "190404a"
+
+# PS.90
+# "190319", 
+# "190319a", 
+# "190322",  
+# "190322a", 
+# "190404"
+ 
+# PS.22.High.Amp
+# "180604", 
+# "180607", 
+# "180615", 
+# "180530", 
+# "180531"
+
+# PS.0.High.Amp
+# "180221",  
+# "180221a", 
+# #"180212",  
+# "180214",  
+# "181019",  
+# "180223"
+
+
+# Reduce data to target times ----
+all.data <- all.data[all.data$Time %in% c(0, 20, 40, 60) , ]
+
+```
+
+### Calculate deltas and percent changes 
+```{r}
+## Calculate percent change for later use: ====
+all.data.p <- convert_data_to(
+  input.df = all.data,
+  convert.to = c("percent"),
+  data.cols = c(
+    "r11", "r12", "r1", "rc", "cc", "rmp", "gj",
+    "htk.peak.mV", "htk.peak.nA", "htk.end.mV", "htk.end.nA",
+    "a.peak.mV", "a.peak.nA", "a.end.mV", "a.end.nA"
+  )
+)
+
+all.data.d <- convert_data_to(
+  input.df = all.data,
+  convert.to = c("difference"),
+  data.cols = c(   "r11", "r12", "r1", "rc", "cc", "rmp", "gj",
+                   "htk.peak.mV", "htk.peak.nA", "htk.end.mV", "htk.end.nA",
+                   "a.peak.mV", "a.peak.nA", "a.end.mV", "a.end.nA"
+  )
+)
+
+M <- all.data#[all.data$Time %in% c(0, 20, 40, 60) , ]
+M.p <- all.data.p#[all.data.p$Time %in% c(0, 20, 40, 60) , ]
+M.d <- all.data.d#[all.data.d$Time %in% c(0, 20, 40, 60) , ] 
+
+## Deduplicate gap junction measurements ====
+M.gj<- deduplicate_gj_obs(input.df = M)
+M.p.gj<- deduplicate_gj_obs(input.df = M.p)
+M.d.gj <- deduplicate_gj_obs(input.df = M.d)
+```
+
+# Thu May 30 11:03:56 2019 ------------------------------
+## Placeholder for TEA LC4/5 ==== Does Igj change when activity changes?
+> If yes -> What part of activity? Does this depend on desync with LC3? Can we rule out desync?
+> If no -> Maybe it's desynchronization dependent?
+
+```{r}
+
+```
+
+# 0, 22, 45, 90, silent (ctrl), TEA (ctrl) ====
+## Figures
+
+### Exploratory, look at all six groups
+```{r}
+d <- M.d
+#d <- M.gj
+# d <- M.d.gj
+#d <- M.p
+
+# d <- d[d$Time < 61,]
+
+d <- d[d$Condition %in% c(
+  "Silent.53mV",
+"PS.0.TEA",
+  "PS.0",
+  "PS.22",
+  "PS.45",
+  "PS.90"
+),]
+
+# d$Condition <- factor(d$Condition, levels = c(
+#   "Silent.53mV",
+# "PS.0.TEA",
+#  "PS.0",
+# "PS.22",
+# "PS.45",
+# "PS.90"
+# ))
+
+
+d$interact <- interaction(d$Experiment, d$Inj_Cell)
+
+d$Condition <- as.character(d$Condition)
+d[d$Condition %in% c("Silent.53mV"), "Condition"] <- "Silent"
+d[d$Condition %in% c("PS.0.TEA"), "Condition"] <- "0 Degrees TEA"
+
+d[d$Condition %in% c("PS.0"), "Condition"] <- "0 Degrees"
+d[d$Condition %in% c("PS.22"), "Condition"] <- "22.5 Degrees"
+d[d$Condition %in% c("PS.45"), "Condition"] <- "45 Degrees"
+d[d$Condition %in% c("PS.90"), "Condition"] <- "90 Degrees"
+d$Condition <- as.factor(d$Condition)
+
+d$Condition <- factor(d$Condition, levels = c(
+  "Silent",
+"0 Degrees TEA",
+ "0 Degrees",
+"22.5 Degrees",
+"45 Degrees",
+"90 Degrees"
+))
+
+
+
+ggplot(d, aes(x = Time, y = cc)) +
+  stat_summary(
+  mapping = aes(fill = Condition),
+  fun.data = mean_sdl,
+  fun.args = list(mult = 1),
+  geom = "ribbon",
+  alpha = 0.2
+  ) +
+  stat_summary(
+  aes(group = Condition),
+  fun.y = mean,
+  geom = "line",
+  size = 1,
+  linetype = 2,
+  color = "black"
+  ) +
+  stat_summary(
+  mapping = aes(color = Condition),
+  fun.y = mean,
+  geom = "point",
+  size = 3,
+  shape = 15
+  ) +
+  stat_summary(
+  fun.y = mean,
+  geom = "point",
+  size = 3,
+  shape = 0
+  ) +
+  geom_pointline(aes(group = Experiment)) +
+  facet_grid(. ~ Condition) +
+  ylab('MegaOhms') +
+  xlab('Time in Minutes') +
+  labs(title = "Coupling Resistance Changes with Phase") +
+  scale_color_brewer() +
+  scale_fill_brewer() +
+  kickme()
+  
+  
+
+
+
+```
+
+
+
+```{r}
+#d <- M.gj
+d <- M.d.gj
+#d <- M.p
+
+d <- d[d$Time < 61,]
+
+d <- d[d$Condition %in% c(
+  "PS.0",
+  "PS.22",
+  "PS.45",
+  "PS.90"
+
+                          ),]
+
+# Drop weird point
+# d <- d[!(d$Experiment == "170802a" &
+#          d$Inj_Cell == "LC5"),]
+# d <- d[d$Time < 55,]
+#levels(d$Condition)
+
+d$Condition <- factor(d$Condition, levels = c(
+ "PS.0",
+"PS.22",
+"PS.45",
+"PS.90"
+))
+
+
+d$interact <- interaction(d$Experiment, d$Inj_Cell)
+
+# First model with observed data
+# fm <- lme(gj ~ Time * Condition, random = ~1 | interact, method = "ML", data = d)
+# stats.table <- anova.lme(fm)
+# stats.table
+# 
+# 
+# summary(glht(fm, linfct=mcp(Condition="Tukey")))
+d$Condition <- as.character(d$Condition)
+
+d[d$Condition %in% c("PS.0"), "Condition"] <- "0 Degrees"
+d[d$Condition %in% c("PS.22"), "Condition"] <- "22.5 Degrees"
+d[d$Condition %in% c("PS.45"), "Condition"] <- "45 Degrees"
+d[d$Condition %in% c("PS.90"), "Condition"] <- "90 Degrees"
+
+d$Condition <- as.factor(d$Condition)
+
+ggplot(d, aes(x = Time, y = gj))+
+  stat_summary(mapping = aes(fill = Condition), fun.data = mean_sdl, fun.args = list(mult = 1), geom = "ribbon", alpha = 0.2) +
+  stat_summary(aes(group = Condition), fun.y = mean, geom = "line", size = 1, linetype = 2, color = "black")+
+  stat_summary(mapping = aes(color = Condition), fun.y = mean, geom = "point", size = 3, shape = 15) +
+  stat_summary(fun.y = mean, geom = "point", size = 3, shape = 0) +
+  geom_pointline(aes(group = Experiment))+
+  facet_grid(.~Condition)+
+  theme_fivethirtyeight()+
+  theme(legend.position = "",
+        axis.title = element_text(), 
+        axis.title.x = element_text()) + 
+  ylab('MegaOhms')+
+  xlab('Time in Minutes')+
+  labs(title = "Coupling Resistance Changes with Phase")+
+  theme(
+        #panel.grid.major = element_blank(), 
+        #panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "transparent",colour = NA),
+        plot.background = element_rect(fill = "transparent",colour = NA),
+        strip.background =element_rect(fill="transparent", colour =NA)
+        )+
+   scale_color_manual(values = c("#000000",
+                                "#002163",
+                                "#0071C2",
+                                "#00AEEE"
+                                ))+
+  scale_fill_manual(values = c("#000000",
+                                "#002163",
+                                "#0071C2",
+                                "#00AEEE"
+                               ))
+```
+
+Save out phase figs
+```{r}
+# #d <- M.gj
+# #d <- M.p
+# phase_figs <- function(d = M.d.gj,
+# response.var = "r11",
+# x.lab = 'Time in Minutes',
+# y.lab = 'MegaOhms',
+# title.lab = "Coupling Resistance Changes with Phase",
+# plt.name = "test.plt.tiff"){
+#   
+# d <- d[d$Time < 61,]
+# 
+# d <- d[d$Condition %in% c(
+#   "PS.0",
+#   "PS.22",
+#   "PS.45",
+#   "PS.90"
+# 
+#                           ),]
+# 
+# # Drop weird point
+# # d <- d[!(d$Experiment == "170802a" &
+# #          d$Inj_Cell == "LC5"),]
+# # d <- d[d$Time < 55,]
+# #levels(d$Condition)
+# 
+# d$Condition <- factor(d$Condition, levels = c(
+#  "PS.0",
+# "PS.22",
+# "PS.45",
+# "PS.90"
+# ))
+# 
+# 
+# d$interact <- interaction(d$Experiment, d$Inj_Cell)
+# 
+# 
+# d$Condition <- as.character(d$Condition)
+# 
+# d[d$Condition %in% c("PS.0"), "Condition"] <- "0 Degrees"
+# d[d$Condition %in% c("PS.22"), "Condition"] <- "22.5 Degrees"
+# d[d$Condition %in% c("PS.45"), "Condition"] <- "45 Degrees"
+# d[d$Condition %in% c("PS.90"), "Condition"] <- "90 Degrees"
+# 
+# d$Condition <- as.factor(d$Condition)
+# 
+# plt <- 
+# ggplot(d, aes_string(x = "Time", y = response.var))+
+#   stat_summary(mapping = aes(fill = Condition), fun.data = mean_sdl, fun.args = list(mult = 1), geom = "ribbon", alpha = 0.2) +
+#   stat_summary(aes(group = Condition), fun.y = mean, geom = "line", size = 1, linetype = 2, color = "black")+
+#   stat_summary(mapping = aes(color = Condition), fun.y = mean, geom = "point", size = 3, shape = 15) +
+#   stat_summary(fun.y = mean, geom = "point", size = 3, shape = 0) +
+#   geom_pointline(aes(group = interact))+
+#   facet_grid(.~Condition)+
+#   theme_fivethirtyeight()+
+#   theme(legend.position = "",
+#         axis.title = element_text(), 
+#         axis.title.x = element_text()) + 
+#   ylab(y.lab)+
+#   xlab(x.lab)+
+#   labs(title = title.lab)+
+#   theme(
+#         #panel.grid.major = element_blank(), 
+#         #panel.grid.minor = element_blank(),
+#         panel.background = element_rect(fill = "transparent",colour = NA),
+#         plot.background = element_rect(fill = "transparent",colour = NA),
+#         strip.background =element_rect(fill="transparent", colour =NA)
+#         )+
+#    scale_color_manual(values = c("#000000",
+#                                 "#002163",
+#                                 "#0071C2",
+#                                 "#00AEEE"
+#                                 ))+
+#   scale_fill_manual(values = c("#000000",
+#                                 "#002163",
+#                                 "#0071C2",
+#                                 "#00AEEE"
+#                                ))+
+#   theme(strip.text.x = element_text(size = 18, colour = "Black", angle = 0),
+#         # strip.text.y = element_text(size = 18, colour = "Black", angle = -90),
+#         axis.text.x = element_text(size = 12, colour = "Black", angle = 0),
+#         axis.text.y = element_text(size = 12, colour = "Black", angle = 0),
+#         axis.title.x = element_text(size = 18, colour = "Black", angle = 0),
+#         axis.title.y = element_text(size = 18, colour = "Black", angle = 90))
+# 
+# ggsave(plt.name, plot = plt, 
+#        device = NULL,
+#   # path = NULL
+#   # , scale = 1, width = NA, height = NA,
+#   # units = c("in", "cm", "mm"), 
+#   dpi = 75#, limitsize = TRUE, ...
+#   )
+# }
+# 
+# 
+# 
+# 
+# for (i in 1:5){
+#   print(i)
+# 
+#   phase_figs(
+#     d = list(M, M, M, M.gj, M.gj)[[i]],
+#   response.var = c("r11","r1","cc","rc","gj")[i],
+#   x.lab = c('Time in Minutes', 'Time in Minutes', 'Time in Minutes','Time in Minutes', 'Time in Minutes')[i],
+#   y.lab = c('MegaOhms','MegaOhms','','MegaOhms','MegaOhms')[i],
+#   title.lab = c("Input Resistance", "Membrane Resistance", "Coupling Coefficient", "Coupling Resistance", "1/Coupling Conductance")[i],
+#   plt.name = c("phase_r_r11.tiff", "phase_r_r1.tiff", "phase_r_cc.tiff", "phase_r_rc.tiff", "phase_r_gj.tiff")[i]
+#   )
+#   
+#   
+# }
+# 
+# 
+# 
+# for (i in 1:5){
+#   print(i)
+# 
+#   phase_figs(
+#     d = list(M.d, M.d, M.d, M.d.gj, M.d.gj)[[i]],
+#   response.var = c("r11","r1","cc","rc","gj")[i],
+#   x.lab = c('Time in Minutes', 'Time in Minutes', 'Time in Minutes','Time in Minutes', 'Time in Minutes')[i],
+#   y.lab = c('MegaOhms','MegaOhms','','MegaOhms','MegaOhms')[i],
+#   title.lab = c("Input Resistance", "Membrane Resistance", "", "Coupling Resistance", "")[i],
+#   plt.name = c("phase_d_r11.tiff", "phase_d_r1.tiff", "phase_d_cc.tiff", "phase_d_rc.tiff", "phase_d_gj.tiff")[i]
+#   )
+# }
+```
+
+## read + incorperate
+## TEST for DJS: CC with Mean/sd ###
+```{r}
+# First find point in time 3 djs is alluding to
+d <- M.p
+d <- d[d$Condition %in% c("PS.90.orig"), ]
+group_vector <- paste0(d$Experiment, d$Inj_Cell)
+
+cowplot::plot_grid(plotlist = list(
+
+  ggplot(d, aes(x = Time, y = cc, color = Experiment, shape = Inj_Cell, group = group_vector))+
+  geom_pointline(),
+  
+ggplot(d, aes(x = Time, y = rc, color = Experiment, shape = Inj_Cell, group = group_vector))+
+  geom_pointline(),
+
+ggplot(d, aes(x = Time, y = gj, color = Experiment, shape = Inj_Cell, group = group_vector))+
+  geom_pointline()#,
+
+# ggplot(d, aes(x = Time, y = r1, color = Experiment, shape = Inj_Cell, group = group_vector))+
+#   geom_pointline()
+
+), nrow = 2, ncol = 2)
+```
+
+0-90
+```{r}
+#d <- M
+d <- M.d
+# d <- M.p
+d <- d[d$Condition %in% c(
+  #"PS.0.High.Amp", 
+  #"Inv", 
+  "PS.0",
+  #"PS.0.TEA", 
+  "PS.22",# "PS.22.High.Amp"#,
+  # "PS.22.orig", 
+  "PS.45",
+  "PS.90"
+  #"Silent.53mV", 
+  # "PS.0.orig", "PS.180.orig", "PS.90.orig"#, "PS.45.orig"
+                          ),]
+
+# Drop weird point
+d <- d[!(d$Experiment == "170802a" &
+         d$Inj_Cell == "LC5"),]
+d <- d[d$Time < 65,]
+#levels(d$Condition)
+
+d$Condition <- factor(d$Condition, levels = c(
+# "PS.0.orig", "PS.22.orig", #"PS.45.orig", 
+#"PS.45", 
+# "PS.90.orig", "PS.180.orig"#, 
+#"PS.0", "PS.22",  "PS.0.High.Amp", "PS.22.High.Amp", 
+#"PS.0.TEA", "Silent.TEA", "Inv", "Silent.53mV"  
+  "PS.0",
+  "PS.22",
+  "PS.45",
+  "PS.90"
+))
+
+
+plot_means2 <- function(temp = M[M$Condition %in% CONDITIONS, ],
+                       predictor = "Time",
+                       response = "cc",
+                       YLIM = c(0.25, 0.75),
+                       TITLE = "Coupling Coefficient Over Time",
+                       XLAB = "Time in Minutes",
+                       YLAB = "Coupling Coefficient",
+                       # ymin = .25,
+                       # ymax = 0.75,
+                       USE.COLORS = c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3"),
+                       LEGEND.POSITION = "",
+                       
+                       include.points = "No") {
+  
+  if (include.points == "No"){
+  p <- ggplot(temp, aes_string(x = predictor, y = response, color = temp$Condition, group = temp$Condition)) +
+    # stat_summary(fun.data = mean_sdl, fun.args = list(mult = 1), geom = "ribbon", alpha = 0.2)+
+    geom_pointrange(
+      stat = "summary", fun.ymin = function(z) {
+        mean(z) - sd(z)
+      }, fun.ymax = function(z) {
+        mean(z) + sd(z)
+      }, fun.y = mean#,
+      #position = position_dodge(.9)
+    ) +
+    stat_summary(aes(group = Condition), fun.y = mean, geom = "line", size = 1, linetype = 2) +
+    stat_summary(fun.y = mean, geom = "point", size = 3, shape = 15, alpha = 0.5) +
+    stat_summary(fun.y = mean, geom = "point", size = 3, shape = 15, color = "White") +
+    stat_summary(fun.y = mean, geom = "point", size = 3, shape = 0, color = "Black") +
+    labs(title = TITLE, x = XLAB, y = YLAB) +
+    coord_capped_cart(bottom = "both") +
+    theme(panel.border = element_blank(), axis.line = element_line()) + # needed for lemon
+    theme(text = element_text(face = "bold", size = 14)) +
+    theme(legend.position = LEGEND.POSITION) +
+    #ylim(YLIM[1], YLIM[2]) +
+    coord_cartesian(ylim = YLIM)+
+    scale_color_manual(values = USE.COLORS)
+  }
+  else if (include.points == "Yes"){
+  p <- ggplot(temp, aes_string(x = predictor, y = response, color = temp$Condition, group = temp$Condition)) +
+    # stat_summary(fun.data = mean_sdl, fun.args = list(mult = 1), geom = "ribbon", alpha = 0.2)+
+    geom_point(position = position_jitter(width = 0.3, height = 0), alpha = 0.3) +
+    # geom_point(shape = 1, position = position_jitter(width = 0.3, height = 0)) +
+    geom_pointrange(
+      stat = "summary", fun.ymin = function(z) {
+        mean(z) - sd(z)
+      }, fun.ymax = function(z) {
+        mean(z) + sd(z)
+      }, fun.y = mean#,
+      #position = position_dodge(.9)
+    ) +
+    stat_summary(aes(group = Condition), fun.y = mean, geom = "line", size = 1, linetype = 2) +
+    stat_summary(fun.y = mean, geom = "point", size = 3, shape = 15, alpha = 0.5) +
+    stat_summary(fun.y = mean, geom = "point", size = 3, shape = 15, color = "White") +
+    stat_summary(fun.y = mean, geom = "point", size = 3, shape = 0, color = "Black") +
+    labs(title = TITLE, x = XLAB, y = YLAB) +
+    coord_capped_cart(bottom = "both") +
+    theme(panel.border = element_blank(), axis.line = element_line()) + # needed for lemon
+    theme(text = element_text(face = "bold", size = 14)) +
+    theme(legend.position = LEGEND.POSITION) +
+    #ylim(YLIM[1], YLIM[2]) +
+    coord_cartesian(ylim = YLIM)+
+    scale_color_manual(values = USE.COLORS)
+  }
+  else if (include.points == "Pointline"){
+  p <- ggplot(temp, aes_string(x = predictor, y = response, color = temp$Condition, group = temp$Condition)) +
+    # stat_summary(fun.data = mean_sdl, fun.args = list(mult = 1), geom = "ribbon", alpha = 0.2)+
+    lemon::geom_pointline(aes(group = temp$Experiment))+
+    geom_point(shape = 1, position = position_jitter(width = 0.3, height = 0)) +
+    geom_pointrange(
+      stat = "summary", fun.ymin = function(z) {
+        mean(z) - sd(z)
+      }, fun.ymax = function(z) {
+        mean(z) + sd(z)
+      }, fun.y = mean#,
+      #position = position_dodge(.9)
+    ) +
+    stat_summary(aes(group = Condition), fun.y = mean, geom = "line", size = 1, linetype = 2) +
+    stat_summary(fun.y = mean, geom = "point", size = 3, shape = 15, alpha = 0.5) +
+    stat_summary(fun.y = mean, geom = "point", size = 3, shape = 15, color = "White") +
+    stat_summary(fun.y = mean, geom = "point", size = 3, shape = 0, color = "Black") +
+    labs(title = TITLE, x = XLAB, y = YLAB) +
+    coord_capped_cart(bottom = "both") +
+    theme(panel.border = element_blank(), axis.line = element_line()) + # needed for lemon
+    theme(text = element_text(face = "bold", size = 14)) +
+    theme(legend.position = LEGEND.POSITION) +
+    # ylim(YLIM[1], YLIM[2]) +
+    coord_cartesian(ylim = YLIM)+
+    scale_color_manual(values = USE.COLORS)
+  }
+  return(p)
+}
+
+#"No" "Yes" "Pointline"
+show.pts <- "No"
+
+# group_vector <- paste0(d$Experiment, d$Inj_Cell)
+# ggplot(d, aes(Time, r11, shape = Inj_Cell, color = Condition))+
+#   geom_boxplot(aes(group = Time), color = "black")+
+#   #geom_pointline(aes(group = group_vector))+
+#   geom_line(aes(group = group_vector), size = 1.2)+
+#   facet_grid(~Condition)+
+#   theme(legend.position = "")+
+#   facet_grid(~Condition)
+
+
+
+
+
+cowplot::plot_grid(plotlist = list(
+  plot_means2(
+    temp = d,
+    predictor = "Time",
+    response = "cc",
+    YLIM =
+    # c(0, 1),
+    c(-1, 1),
+     # c(-30, 60),
+    #c(min(d$cc, na.rm = T), max(d$cc, na.rm = T)),
+    TITLE = "Coupling Coef.",
+    XLAB = "Time (Min)",
+    YLAB = "Coupling Coef.",
+    USE.COLOR = # c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3")
+    # c("#7FC97F", "#BEAED4", "#FDC086", "#FFFF99", "#386CB0", "#F0027F")
+    c("#4d4d4d", "#984EA3", "#377EB8", "#4DAF4A", "#FF7F00", "#E41A1C"),
+    LEGEND.POSITION = "right",
+    include.points = show.pts
+  ),
+
+  plot_means2(
+    temp = d,
+    predictor = "Time",
+    response = "r11",
+    YLIM =
+    # c(0, 6),
+    c(-3, 3),
+     # c(-30, 35),
+    #c(min(d$r11, na.rm = T), max(d$r11, na.rm = T)),
+    TITLE = "Input Resistance",
+    XLAB = "Time (Min)",
+    YLAB = "Mega Ohms",
+    USE.COLOR = # c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3")
+    # c("#7FC97F", "#BEAED4", "#FDC086", "#FFFF99", "#386CB0", "#F0027F")
+    c("#4d4d4d", "#984EA3", "#377EB8", "#4DAF4A", "#FF7F00", "#E41A1C"),
+    LEGEND.POSITION = "right",
+    include.points = show.pts
+  ),
+
+  plot_means2(
+    temp = d,
+    predictor = "Time",
+    response = "gj",
+    YLIM =
+    # c(0, 15),
+    c(-2.5, 2.5),
+     # c(-40, 50),
+    #c(min(d$rc, na.rm = T), max(d$rc, na.rm = T)),
+    TITLE = "Coupling Resistance",
+    XLAB = "Time (Min)",
+    YLAB = "Mega Ohms",
+    USE.COLOR = # c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3")
+    # c("#7FC97F", "#BEAED4", "#FDC086", "#FFFF99", "#386CB0", "#F0027F")
+    c("#4d4d4d", "#984EA3", "#377EB8", "#4DAF4A", "#FF7F00", "#E41A1C"),
+    LEGEND.POSITION = "right",
+    include.points = show.pts
+  ),
+  
+    plot_means2(
+      temp = d,
+      predictor = "Time",
+      response = "rmp",
+      YLIM =
+      # c(-80, -20),
+      c(-20, 20),
+       # c(-10, 25),
+      #c(min(d$rmp, na.rm = T), max(d$rmp, na.rm = T)),
+      TITLE = "Resting Membrane Potential",
+      XLAB = "Time (Min)",
+      YLAB = "mV",
+      USE.COLOR = # c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3")
+      # c("#7FC97F", "#BEAED4", "#FDC086", "#FFFF99", "#386CB0", "#F0027F")
+      c("#4d4d4d", "#984EA3", "#377EB8", "#4DAF4A", "#FF7F00", "#E41A1C"),
+      LEGEND.POSITION = "right",
+      include.points = show.pts
+    )
+  
+), nrow = 1)
+
+
+
+
+```
+names of the resultant files:
+1500x600_raw_x_sd_pts
+1500x600_raw_x_sd
+
+1500x600_del_x_sd_pts
+1500x600_del_x_sd
+
+1500x600_per_x_sd_pts
+1500x600_per_x_sd
+
+
+> group_vector <- paste(d$Experiment, d$Inj_Cell)
+
+## Statistics
+Here we resample all of our linear models and then produce standard and empirical p values
+```{r perform resampling}
+if (resample.results == TRUE){
+  tic1 <- Sys.time()
+  me_cell <- purrr::map(c("r11", "r1", "cc"
+                          # , "htk.peak.nA", "a.peak.nA"
+                          ), function(x) {
+    run_standardized_lme_resample_Phase(
+      response.var = x,
+      input.df = M[M$Condition %in% c("PS.0", "PS.22", "PS.45", "PS.90"), ],
+      nreps = resample.nreps,
+      use.seed = 432431,
+      mute.completion = TRUE,
+      mute.time = FALSE
+    )
+  })
+  
+  me_exps <- purrr::map(c("rc", "gj"), function(x) {
+    run_standardized_lme_resample_Phase(
+      response.var = x,
+      input.df = M.gj[M.gj$Condition %in% c("PS.0", "PS.22", "PS.45", "PS.90"), ],
+      nreps = resample.nreps,
+      use.seed = 432431,
+      mute.completion = TRUE,
+      mute.time = FALSE
+    )
+  })
+  toc1 <- Sys.time()
+  print(toc1 - tic1)
+  
+  # Restructure into a single list of all outputs
+  me_all <- list()
+  walk(seq_along(me_cell), function(X){ me_all[[length(me_all)+1]] <<- me_cell[[X]] })
+  walk(seq_along(me_exps), function(X){ me_all[[length(me_all)+1]] <<- me_exps[[X]] })
+  
+  saveRDS(me_all, file = paste0(getwd(), "/data/chapter2/", "resampled_phase_model_results", ".rds"))
+} else {
+  me_all <- readRDS(paste0(getwd(), "/data/chapter2/", "resampled_phase_model_results", ".rds"))
+}
+
+```
+
+
+```{r calc empirical p}
+# Main effect empirical p values
+measures <- c("r11", "r1", 
+              "cc", 
+              # "htk.peak.nA", "a.peak.nA",
+              "rc", 
+              "gj")
+out <- as.data.frame(matrix(ncol = 4, nrow = length(measures)))
+names(out) <- c("Intercept", "Time", "Phase", "Time:Phase")
+rownames(out) <- measures
+
+walk(seq_along(measures), function(i){
+  walk(1:4, function(j){
+    out[i, j] <<- one_tail_to_epval(input.array = me_all[[i]][,j], tail = "upper")
+  })
+})
+
+
+out.holm <- t(out) %>% as.data.frame()
+walk(1:ncol(out.holm), function(i){
+  out.holm[,i] <<- p.adjust(out.holm[,i], method = "holm") 
+})
+out.holm <- t(out.holm) %>% as.data.frame()
+
+
+knitr::kable(out)
+knitr::kable(out.holm)
+
+# write.csv(out, paste0(getwd(), "/epvals_phase.csv"))
+# write.csv(out.holm, paste0(getwd(), "/epvals_holm_phase.csv"))
+
+write.csv(out, paste0("C:/Users/Daniel/Desktop/epvals_phase.csv"))
+write.csv(out.holm, paste0("C:/Users/Daniel/Desktop/epvals_holm_phase.csv"))
+
+```
+
+
+## Phase Shift -- All tests resampled
+
+
+
+
+
+
+
+
+# 0, 22, 22HV, 90HV ==== Is 22.5 effect real?
+```{r}
+d <- M.gj
+d <- M.d.gj
+#d <- M.p
+
+d <- d[d$Time < 61,]
+
+d <- d[d$Condition %in% c(
+  "PS.0",
+  "PS.22",
+  "PS.0.High.Amp",
+  "PS.22.High.Amp"
+
+                          ),]
+
+# Drop weird point
+# d <- d[!(d$Experiment == "170802a" &
+#          d$Inj_Cell == "LC5"),]
+# d <- d[d$Time < 55,]
+#levels(d$Condition)
+
+d$Condition <- factor(d$Condition, levels = c(
+ "PS.0",
+"PS.22",
+"PS.0.High.Amp",
+"PS.22.High.Amp"
+))
+
+
+d$interact <- interaction(d$Experiment, d$Inj_Cell)
+
+d$Phase <- "None"
+  d[d$Condition %in% c("PS.22", "PS.22.High.Amp"), "Phase"] <- "22.5 Degrees"
+  d[d$Condition %in% c("PS.0", "PS.0.High.Amp"), "Phase"] <- "0 Degrees"
+  d$Amp <- "None"
+  d[d$Condition %in% c("PS.0.High.Amp", "PS.22.High.Amp"), "Amp"] <- "High Voltage"
+  d[d$Condition %in% c("PS.0", "PS.22"), "Amp"] <- "Control Voltage"
+
+
+
+#   # First model with observed data
+#   fm <- lme(gj ~ Time * Phase + Time * Amp + Phase * Amp, random = ~1 | interact, method = "ML", data = d)
+#   stats.table <- anova.lme(fm)
+# stats.table
+
+
+#summary(glht(fm, linfct=mcp(Condition="Tukey")))
+
+
+ggplot(d, aes(x = Time, y = gj))+
+  stat_summary(mapping = aes(fill = Condition), fun.data = mean_sdl, fun.args = list(mult = 1), geom = "ribbon", alpha = 0.2) +
+  stat_summary(aes(group = Condition), fun.y = mean, geom = "line", size = 1, linetype = 2, color = "black")+
+  stat_summary(mapping = aes(color = Condition), fun.y = mean, geom = "point", size = 3, shape = 15) +
+  stat_summary(fun.y = mean, geom = "point", size = 3, shape = 0) +
+  geom_pointline(aes(group = Experiment))+
+  facet_grid(Phase~Amp)+
+  theme_fivethirtyeight()+
+  theme(legend.position = "",
+        axis.title = element_text(), 
+        axis.title.x = element_text()) + 
+  ylab('MegaOhms')+
+  xlab('Time in Minutes')+
+  labs(title = "Coupling Resistance Changes with Phase")+
+  theme(
+        #panel.grid.major = element_blank(), 
+        #panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "transparent",colour = NA),
+        plot.background = element_rect(fill = "transparent",colour = NA),
+        strip.background =element_rect(fill="transparent", colour =NA))+
+  # ggsci::scale_fill_aaas()+
+  # ggsci::scale_color_aaas()
+  scale_color_manual(values = c("#000000",
+                                "#002163",
+                                "#006837",
+                               "#31A354"))+
+  scale_fill_manual(values = c("#000000",
+                                "#002163",
+                                "#006837",
+                               "#31A354"))
+
+
+```
+
+```{r}
+# phase_HA_figs <- function(d = M.d.gj,
+# response.var = "r11",
+# x.lab = 'Time in Minutes',
+# y.lab = 'MegaOhms',
+# title.lab = "Coupling Resistance Changes with Phase",
+# plt.name = "test.plt.tiff"){
+#   
+# 
+#   d <- d[d$Time < 61,]
+# 
+# d <- d[d$Condition %in% c(
+#   "PS.0",
+#   "PS.22",
+#   "PS.0.High.Amp",
+#   "PS.22.High.Amp"
+# 
+#                           ),]
+# 
+# # Drop weird point
+# # d <- d[!(d$Experiment == "170802a" &
+# #          d$Inj_Cell == "LC5"),]
+# # d <- d[d$Time < 55,]
+# #levels(d$Condition)
+# 
+# d$Condition <- factor(d$Condition, levels = c(
+#  "PS.0",
+# "PS.22",
+# "PS.0.High.Amp",
+# "PS.22.High.Amp"
+# ))
+# 
+# 
+# d$interact <- interaction(d$Experiment, d$Inj_Cell)
+# 
+# d$Phase <- "None"
+#   d[d$Condition %in% c("PS.22", "PS.22.High.Amp"), "Phase"] <- "22.5 Degrees"
+#   d[d$Condition %in% c("PS.0", "PS.0.High.Amp"), "Phase"] <- "0 Degrees"
+#   d$Amp <- "None"
+#   d[d$Condition %in% c("PS.0.High.Amp", "PS.22.High.Amp"), "Amp"] <- "High Voltage"
+#   d[d$Condition %in% c("PS.0", "PS.22"), "Amp"] <- "Control Voltage"
+# 
+#   
+# plt <- 
+# ggplot(d, aes_string(x = "Time", y = response.var))+
+#   stat_summary(mapping = aes(fill = Condition), fun.data = mean_sdl, fun.args = list(mult = 1), geom = "ribbon", alpha = 0.2) +
+#   stat_summary(aes(group = Condition), fun.y = mean, geom = "line", size = 1, linetype = 2, color = "black")+
+#   stat_summary(mapping = aes(color = Condition), fun.y = mean, geom = "point", size = 3, shape = 15) +
+#   stat_summary(fun.y = mean, geom = "point", size = 3, shape = 0) +
+#   geom_pointline(aes(group = interact))+
+#   facet_grid(Phase~Amp)+
+#   theme_fivethirtyeight()+
+#   theme(legend.position = "",
+#         axis.title = element_text(), 
+#         axis.title.x = element_text()) + 
+#   ylab(y.lab)+
+#   xlab(x.lab)+
+#   labs(title = title.lab)+
+#   theme(
+#         #panel.grid.major = element_blank(), 
+#         #panel.grid.minor = element_blank(),
+#         panel.background = element_rect(fill = "transparent",colour = NA),
+#         plot.background = element_rect(fill = "transparent",colour = NA),
+#         strip.background =element_rect(fill="transparent", colour =NA)
+#         )+
+#    scale_color_manual(values = c("#000000",
+#                                 "#002163",
+#                                 "#006837",
+#                                "#31A354"))+
+#   scale_fill_manual(values = c("#000000",
+#                                 "#002163",
+#                                 "#006837",
+#                                "#31A354"))+
+#   theme(strip.text.x = element_text(size = 18, colour = "Black", angle = 0),
+#         strip.text.y = element_text(size = 18, colour = "Black", angle = -90),
+#         axis.text.x = element_text(size = 12, colour = "Black", angle = 0),
+#         axis.text.y = element_text(size = 12, colour = "Black", angle = 0),
+#         axis.title.x = element_text(size = 18, colour = "Black", angle = 0),
+#         axis.title.y = element_text(size = 18, colour = "Black", angle = 90))
+# 
+# 
+# 
+# ggsave(plt.name, plot = plt, 
+#        device = NULL,
+#   # path = NULL
+#   # , scale = 1, width = NA, height = NA,
+#   # units = c("in", "cm", "mm"), 
+#   dpi = 75#, limitsize = TRUE, ...
+#   )
+# }
+# 
+# 
+# for (i in 1:5){
+#   print(i)
+# 
+#   phase_HA_figs(
+#     d = list(M, M, M, M.gj, M.gj)[[i]],
+#   response.var = c("r11","r1","cc","rc","gj")[i],
+#   x.lab = c('Time in Minutes', 'Time in Minutes', 'Time in Minutes','Time in Minutes', 'Time in Minutes')[i],
+#   y.lab = c('MegaOhms','MegaOhms','','MegaOhms','MegaOhms')[i],
+#   title.lab = c("Input Resistance", "Membrane Resistance", "Coupling Coefficient", "Coupling Resistance", "1/Coupling Conductance")[i],
+#   plt.name = c("twoxtwo_r_r11.tiff", "twoxtwo_r_r1.tiff", "twoxtwo_r_cc.tiff", "twoxtwo_r_rc.tiff", "twoxtwo_r_gj.tiff")[i]
+#   )
+#   
+#   
+# }
+# 
+# 
+# 
+# for (i in 1:5){
+#   print(i)
+# 
+#   phase_HA_figs(
+#     d = list(M.d, M.d, M.d, M.d.gj, M.d.gj)[[i]],
+#   response.var = c("r11","r1","cc","rc","gj")[i],
+#   x.lab = c('Time in Minutes', 'Time in Minutes', 'Time in Minutes','Time in Minutes', 'Time in Minutes')[i],
+#   y.lab = c('MegaOhms','MegaOhms','','MegaOhms','MegaOhms')[i],
+#   title.lab = c("Input Resistance", "Membrane Resistance", "", "Coupling Resistance", "")[i],
+#   plt.name = c("twoxtwo_d_r11.tiff", "twoxtwo_d_r1.tiff", "twoxtwo_d_cc.tiff", "twoxtwo_d_rc.tiff", "twoxtwo_d_gj.tiff")[i]
+#   )
+# }
+
+```
+
+
+### 2x2 -- All tests resampled
+Here we resample all of our linear models and then produce standard and empirical p values
+
+```{r resampling fcns}
+run_standardized_lme <- function(response.var = "cc",
+                                 input.df = M[M$Condition %in% c("PS.0.High.Amp", "PS.0", "PS.22", "PS.22.High.Amp"), ],
+                                 mute.time = FALSE) {
+  tic <- Sys.time()
+
+  # Transform the data so that it's ready for the test
+  input.df <- input.df[!(is.na(input.df[[response.var]])), ]
+  input.df$response.var <- input.df[[response.var]]
+  # input.df$Time <- as.factor(input.df$Time)
+  input.df$interact <- interaction(input.df$Experiment, input.df$Inj_Cell)
+
+  input.df$Phase <- "None"
+  input.df[input.df$Condition %in% c("PS.22", "PS.22.High.Amp"), "Phase"] <- "Offset"
+  input.df[input.df$Condition %in% c("PS.0", "PS.0.High.Amp"), "Phase"] <- "Normal"
+  input.df$Amp <- "None"
+  input.df[input.df$Condition %in% c("PS.0.High.Amp", "PS.22.High.Amp"), "Amp"] <- "High"
+  input.df[input.df$Condition %in% c("PS.0", "PS.22"), "Amp"] <- "Normal"
+
+  input.df <- input.df[, c("response.var", "interact", "Time", "Phase", "Amp")]
+
+  # First model with observed data
+  fm <- lme(response.var ~ Time * Phase + Time * Amp + Phase * Amp, random = ~1 | interact, method = "ML", data = input.df)
+  stats.table <- anova.lme(fm)
+
+  toc <- Sys.time()
+
+  if (mute.time != TRUE){
+    print(toc - tic)
+  }
+  return(stats.table)
+}
+
+run_standardized_lme_resample <- function(response.var = "cc",
+                                          input.df = M[M$Condition %in% c("PS.0.High.Amp", "PS.0", "PS.22", "PS.22.High.Amp"), ],
+                                          nreps = 1e4,
+                                          use.seed = 432431,
+                                          mute.completion = FALSE,
+                                          mute.time = FALSE) {
+  #for debugging
+  if (F == T){
+    response.var = "cc"
+    input.df = M[M$Condition %in% c("PS.0.High.Amp", "PS.0", "PS.22", "PS.22.High.Amp"), ]
+    nreps = 100
+    use.seed = 432431
+    mute.completion = FALSE
+    mute.time = FALSE
+  }
+  
+  tic <- Sys.time()
+  
+  # Transform the data so that it's ready for the test
+  input.df <- input.df[!(is.na(input.df[[response.var]])), ]
+  input.df$response.var <- input.df[[response.var]]
+  # input.df$Time <- as.factor(input.df$Time)
+  input.df$interact <- interaction(input.df$Experiment, input.df$Inj_Cell)
+  
+  input.df$Phase <- "None"
+  input.df[input.df$Condition %in% c("PS.22", "PS.22.High.Amp"), "Phase"] <- "Offset"
+  input.df[input.df$Condition %in% c("PS.0", "PS.0.High.Amp"), "Phase"] <- "Normal"
+  input.df$Amp <- "None"
+  input.df[input.df$Condition %in% c("PS.0.High.Amp", "PS.22.High.Amp"), "Amp"] <- "High"
+  input.df[input.df$Condition %in% c("PS.0", "PS.22"), "Amp"] <- "Normal"
+  
+  input.df <- input.df[, c("response.var", "interact", "Time", "Phase", "Amp")]
+  
+  # First model with observed data
+  fm <- lme(response.var ~ Time * Phase + Time * Amp + Phase * Amp, random = ~1 | interact, method = "ML", data = input.df)
+  stats.table <- anova.lme(fm)
+  
+  F_stats <- matrix(NA, nrow = nreps, ncol = length(stats.table$`F-value`))
+  F_stats[1, ] <- stats.table$`F-value`
+  
+  
+  set.seed(use.seed)
+  for (ii in 2:nreps) {
+    
+    if (mute.completion != TRUE){
+      print(paste0(((ii/nreps)*100), "%"))
+    }
+    rand.lme <- try(lme(sample(response.var) ~ Time * Phase + Time * Amp + Phase * Amp, random = ~1 | interact, method = "ML", data = input.df))
+    F_stats[ii, ] <- try(anova.lme(rand.lme)$`F-value`)
+    
+    
+    # In case there is a convergence issue we immediately replace that value to get the target number of reps. 
+    while (is.na(as.numeric(F_stats[ii, 1]))) {
+      print("Replacing model with singular convergence")
+      rand.lme <- try(lme(sample(response.var) ~ Time * Phase + Time * Amp + Phase * Amp, random = ~1 | interact, method = "ML", data = input.df))
+      F_stats[ii, ] <- try(anova.lme(rand.lme)$`F-value`)
+      
+    }
+  }
+  
+  F_stats <- as.data.frame(F_stats)
+  names(F_stats) <- rownames(stats.table)
+  
+  #Convert from factor/cha to int
+  walk(1:7, function(X){
+    F_stats[,X] <<- as.numeric(F_stats[,X])
+  })
+  toc <- Sys.time()
+  
+  if (mute.time != TRUE){
+    print(toc - tic)    
+  }
+  return(na.omit(F_stats))
+}
+
+
+```
+
+### non-resampled
+```{r run standard tests}
+tic1 <- Sys.time()
+me_cell <- purrr::map(c("r11", "r1", "cc", "htk.peak.nA", "a.peak.nA"), function(x) {
+  run_standardized_lme(
+    response.var = x,
+    input.df = M[M$Condition %in% c("PS.0.High.Amp", "PS.0", "PS.22", "PS.22.High.Amp"), ],
+    mute.time = FALSE
+  )
+})
+
+me_exps <- purrr::map(c("rc", "gj"), function(x) {
+  run_standardized_lme(
+    response.var = x,
+    input.df = M.gj[M.gj$Condition %in% c("PS.0.High.Amp", "PS.0", "PS.22", "PS.22.High.Amp"), ],
+    mute.time = FALSE
+  )
+})
+toc1 <- Sys.time()
+print(toc1 - tic1)
+```
+
+
+```{r mk tables for standard tests}
+# Restructure into a single list of all outputs
+me_all <- list()
+walk(seq_along(me_cell), function(X){ me_all[[length(me_all)+1]] <<- me_cell[[X]] })
+walk(seq_along(me_exps), function(X){ me_all[[length(me_all)+1]] <<- me_exps[[X]] })
+
+measures <- c("r11", "r1", 
+              "cc", 
+              "htk.peak.nA", "a.peak.nA",
+              "rc", 
+              "gj")
+# Add measures column
+walk(seq_along(me_all), function(X){
+  me_all[[X]]$response.var <<- measures[X]
+})
+
+# 
+out <- me_all[[1]]
+walk(2:length(me_all), function(X){
+  out <<- rbind(out, me_all[[X]])
+})
+
+# Holm correct
+out.holm <- out
+
+responses <- unique(out.holm$response.var)
+
+walk(seq_along(responses), function(i){
+  out.holm[out.holm$response.var == responses[i], "p-value"] <<- p.adjust(out.holm[out.holm$response.var == responses[i], "p-value"], method = "holm")
+})
+
+
+knitr::kable(out)
+
+knitr::kable(out.holm)
+
+#write.csv(out, paste0(getwd(), "/inst/extdata/output/pvals_main_effect.csv"))
+#write.csv(out.holm, paste0(getwd(), "/inst/extdata/output/pvals_main_effect_holm.csv"))
+```
+
+
+### Resampled
+```{r perform resampling}
+if (resample.results == TRUE){
+  tic1 <- Sys.time()
+  me_cell <- purrr::map(c("r11", "r1", "cc"
+                          # , "htk.peak.nA", "a.peak.nA"
+                          ), function(x) {
+    run_standardized_lme_resample(
+      response.var = x,
+      input.df = M[M$Condition %in% c("PS.0.High.Amp", "PS.0", "PS.22", "PS.22.High.Amp"), ],
+      nreps = resample.nreps,
+      use.seed = 432431,
+      mute.completion = TRUE,
+      mute.time = FALSE
+    )
+  })
+  
+  me_exps <- purrr::map(c("rc", "gj"), function(x) {
+    run_standardized_lme_resample(
+      response.var = x,
+      input.df = M.gj[M.gj$Condition %in% c("PS.0.High.Amp", "PS.0", "PS.22", "PS.22.High.Amp"), ],
+      nreps = resample.nreps,
+      use.seed = 432431,
+      mute.completion = TRUE,
+      mute.time = FALSE
+    )
+  })
+  toc1 <- Sys.time()
+  print(toc1 - tic1)
+  
+  # Restructure into a single list of all outputs
+  me_all <- list()
+  walk(seq_along(me_cell), function(X){ me_all[[length(me_all)+1]] <<- me_cell[[X]] })
+  walk(seq_along(me_exps), function(X){ me_all[[length(me_all)+1]] <<- me_exps[[X]] })
+  
+  saveRDS(me_all, file = paste0(getwd(), "/data/chapter2/", "resampled_2x2_model_results", ".rds"))
+} else {
+  me_all <- readRDS(paste0(getwd(), "/data/chapter2/", "resampled_2x2_model_results", ".rds"))
+}
+
+```
+
+
+```{r calc empirical p}
+
+# Generic function for calculating an epirical p from an array (assumes one tail and observed value is at index 1) intended for f distributions
+one_tail_to_epval <- function(input.array = me_all[[4]][,2], tail = "upper"){
+  if (tail == "upper"){
+    more.extreme <- sum(input.array >= input.array[1], na.rm = T)    
+    return(more.extreme / (length(input.array) - sum(is.na(input.array))))
+  }else if (tail == "lower"){
+    more.extreme <- sum(input.array <= input.array[1], na.rm = T)
+    return(more.extreme / (length(input.array) - sum(is.na(input.array))))
+  }else{
+    warning("Please set tail to either \"upper\" or \"lower\" \nReturning nothing.")
+  }
+}
+
+# Generic function for calculating an epirical p from an array (assumes two tailed, symmetric, and observed value is at index 1)
+two_tail_to_epval <- function(input.array = ls_means$OH){
+  xbar <- mean(input.array, na.rm = T)
+  if (input.array[1] < xbar){
+    more.extreme <- sum(input.array <= input.array[1], na.rm = T) +
+      sum(input.array >= (xbar+(xbar - input.array[1])), na.rm = T) #reflected across the mean to make this two tailed
+  } else if (input.array[1] > xbar){
+    more.extreme <- sum(input.array >= input.array[1], na.rm = T) +
+      sum(input.array <= (xbar+(xbar - input.array[1])), na.rm = T) #reflected across the mean to make this two tailed
+  } else {
+    warning("Observed == sample mean!")
+    more.extreme <- length(input.array) - sum(is.na(input.array))
+  }
+  return(more.extreme/(length(input.array) - sum(is.na(input.array))))
+}
+
+
+# Main effect empirical p values
+measures <- c("r11", "r1", 
+              "cc", 
+              # "htk.peak.nA", "a.peak.nA",
+              "rc", 
+              "gj")
+out <- as.data.frame(matrix(ncol = 7, nrow = length(measures)))
+names(out) <- c("Intercept", "Time", "Phase", "Amp", "Time:Phase", "Time:Amp", "Phase:Amp")
+rownames(out) <- measures
+
+walk(seq_along(measures), function(i){
+  walk(1:7, function(j){
+    out[i, j] <<- one_tail_to_epval(input.array = me_all[[i]][,j], tail = "upper")
+  })
+})
+
+
+out.holm <- t(out) %>% as.data.frame()
+walk(1:ncol(out.holm), function(i){
+  out.holm[,i] <<- p.adjust(out.holm[,i], method = "holm") 
+})
+out.holm <- t(out.holm) %>% as.data.frame()
+
+
+knitr::kable(out)
+knitr::kable(out.holm)
+
+# write.csv(out, paste0(getwd(), "/epvals_2x2.csv"))
+# write.csv(out.holm, paste0(getwd(), "/epvals_holm_2x2.csv"))
+write.csv(out, paste0("C:/Users/Daniel/Desktop/epvals_2x2.csv"))
+write.csv(out.holm, paste0("C:/Users/Daniel/Desktop/epvals_holm_2x2.csv"))
+```
+
+
+
+
+
+# Extra-- the originals
+## TEST for DJS: visualize only the original data
+```{r}
+d <- M.gj
+d <- d[d$Condition %in% c(
+  #"PS.0.High.Amp", 
+  #"Inv", 
+  #"PS.0", #"PS.0.TEA", 
+  #"PS.22", "PS.22.High.Amp", 
+  "PS.22.orig", 
+  #"PS.45"#, 
+  #"Silent.53mV", 
+  "PS.0.orig", "PS.180.orig", "PS.90.orig", "PS.45.orig"
+                          ),]
+d$Synchronous <- F
+d[d$Condition == "PS.0.orig", "Synchronous"] <- T
+
+
+cowplot::plot_grid(plotlist = list(
+
+ggplot(d, aes(x = Time, y = rc, color = Synchronous))+
+  geom_smooth()+
+  geom_point(),
+
+ggplot(d, aes(x = Time, y = cc, color = Synchronous))+
+  geom_smooth()+
+  geom_point(),
+
+
+
+
+
+ggplot(d, aes(x = Time, y = rc, color = Condition))+
+  geom_smooth(se = F)+
+  geom_point(),
+
+ggplot(d, aes(x = Time, y = cc, color = Condition))+
+  geom_smooth(se = F)+
+  geom_point()
+
+))
+```
+
+
+## TEST for djs recreate comps percent change figure
+```{r}
+#d <- M
+#d <- M.d
+d <- M.p
+d <- d[d$Condition %in% c(
+  #"PS.0.High.Amp", 
+  #"Inv", 
+  #"PS.0", 
+  #"PS.0.TEA", 
+  #"PS.22", "PS.22.High.Amp"#, 
+  "PS.22.orig", 
+  "PS.45", 
+  #"Silent.53mV", 
+  "PS.0.orig", "PS.180.orig", "PS.90.orig", "PS.45.orig"
+                          ),]
+
+#levels(d$Condition)
+
+d$Condition <- factor(d$Condition, levels = c(
+"PS.0.orig", "PS.22.orig", "PS.45.orig", "PS.45", "PS.90.orig", "PS.180.orig"#, 
+#"PS.0", "PS.22",  "PS.0.High.Amp", "PS.22.High.Amp", 
+#"PS.0.TEA", "Silent.TEA", "Inv", "Silent.53mV"  
+))
+
+#library(RColorBrewer)
+# ggplot(d, aes(x = Time, y = cc, color = Condition))+
+#   geom_point(shape = 1)+
+#   geom_point(alpha = 0.3)+
+#   geom_hline(yintercept = 0, linetype = "dashed")+
+#   stat_summary(aes(group=Condition), fun.y=mean, geom="line", size = 1)+
+#   stat_summary(aes(group=Condition), fun.y=mean, geom="point", shape = 3, size = 3)+
+#   theme(legend.position = "bottom")+
+#   labs(title = "with mean")+
+#   ggsci::scale_color_locuszoom()
+  
+cowplot::plot_grid(plotlist = list(
+ggplot(d, aes(x = Time, y = cc, color = Condition))+
+  geom_point(shape = 1)+
+  geom_point(alpha = 0.3)+
+  geom_hline(yintercept = 0, linetype = "dashed")+
+  stat_summary(aes(group=Condition), fun.y=mean, geom="line", size = 1)+
+  stat_summary(aes(group=Condition), fun.y=mean, geom="point", shape = 3, size = 3)+
+  #theme(legend.position = "bottom")+
+  labs(title = "with mean")+
+  ggsci::scale_color_locuszoom(),
+  
+  
+ggplot(d, aes(x = Time, y = cc, color = Condition))+
+  geom_point(shape = 1)+
+  geom_point(alpha = 0.3)+
+  geom_hline(yintercept = 0, linetype = "dashed")+
+  stat_summary(aes(group=Condition), fun.y=median, geom="line", size = 1)+
+  stat_summary(aes(group=Condition), fun.y=median, geom="point", shape = 3, size = 3)+
+  #theme(legend.position = "bottom")+
+  labs(title = "with median")+
+  ggsci::scale_color_locuszoom()
+))
+
+cowplot::plot_grid(plotlist = list(
+ggplot(d[d$Condition != "PS.45.orig", ], aes(x = Time, y = cc, color = Condition))+
+  geom_point(shape = 1)+
+  geom_point(alpha = 0.3)+
+  geom_hline(yintercept = 0, linetype = "dashed")+
+  stat_summary(aes(group=Condition), fun.y=mean, geom="line", size = 1)+
+  stat_summary(aes(group=Condition), fun.y=mean, geom="point", shape = 3, size = 3)+
+  #theme(legend.position = "bottom")+
+  labs(title = "with mean, no 45")+
+  ggsci::scale_color_locuszoom(),
+
+ggplot(d[d$Condition != "PS.45.orig" &
+           d$Condition != "PS.45", ], aes(x = Time, y = cc, color = Condition))+
+  geom_point(shape = 1)+
+  geom_point(alpha = 0.3)+
+  geom_hline(yintercept = 0, linetype = "dashed")+
+  stat_summary(aes(group=Condition), fun.y=mean, geom="line", size = 1)+
+  stat_summary(aes(group=Condition), fun.y=mean, geom="point", shape = 3, size = 3)+
+  
+  stat_summary(data = d[d$Condition == "PS.45", ],
+                aes(x = Time, y = cc, color = Condition, group = Condition), fun.y=median, geom="line", linetype = "dashed", size = 1
+               #, color = "#EDF8FB"
+               )+
+  #theme(legend.position = "bottom")+
+  labs(title = "with mean, no 45")+
+  ggsci::scale_color_locuszoom()
+))
+
+
+### Change colors ####
+cowplot::plot_grid(plotlist = list(
+ggplot(d[d$Condition != "PS.45.orig" &
+              d$Condition != "PS.45", ], aes(x = Time, y = cc, color = Condition))+
+  geom_point(shape = 1)+
+  geom_point(alpha = 0.3)+
+  geom_hline(yintercept = 0, linetype = "dashed")+
+  stat_summary(aes(group=Condition), fun.y=mean, geom="line", size = 1)+
+  stat_summary(aes(group=Condition), fun.y=mean, geom="point", shape = 3, size = 3)+
+  #theme(legend.position = "bottom")+
+  labs(title = "with mean, no 45")+
+
+  stat_summary(data = d[d$Condition == "PS.45", ],
+                aes(x = Time, y = cc, color = Condition, group = Condition), fun.y=median, geom="line", linetype = "dashed", size = 1
+               #, color = "#EDF8FB"
+               )+
+  #ggsci::scale_color_locuszoom()  
+  scale_color_manual(values = c("#7FCDBB","#41B6C4","#1D91C0","#225EA8","#253494") ),
+
+ggplot(d[d$Condition != "PS.45.orig" &
+              d$Condition != "PS.45", ], aes(x = Time, y = cc, color = Condition))+
+  geom_point(shape = 1)+
+  geom_point(alpha = 0.3)+
+  geom_hline(yintercept = 0, linetype = "dashed")+
+  stat_summary(aes(group=Condition), fun.y=median, geom="line", size = 1)+
+  stat_summary(aes(group=Condition), fun.y=median, geom="point", shape = 3, size = 3)+
+  #theme(legend.position = "bottom")+
+  labs(title = "with median, no 45")+
+
+  stat_summary(data = d[d$Condition == "PS.45", ],
+                aes(x = Time, y = cc, color = Condition, group = Condition), fun.y=median, geom="line", linetype = "dashed", size = 1
+               #, color = "#EDF8FB"
+               )+
+  #ggsci::scale_color_locuszoom()  
+  scale_color_manual(values = c("#7FCDBB","#41B6C4","#1D91C0","#225EA8","#253494") )
+#c("#C7E9B4","#7FCDBB","#41B6C4","#2C7FB8","#253494"))
+
+))
+
+
+
+
+
+### Drop points ####
+
+cowplot::plot_grid(plotlist = list(
+ggplot(d[d$Condition != "PS.45.orig" &
+           d$Condition != "PS.45", ], aes(x = Time, y = cc, color = Condition))+
+  # geom_point(shape = 1)+
+  # geom_point(alpha = 0.3)+
+  geom_hline(yintercept = 0, linetype = "dashed")+
+  stat_summary(aes(group=Condition), fun.y=mean, geom="line", size = 1)+
+  stat_summary(aes(group=Condition), fun.y=mean, geom="point", shape = 3, size = 3)+
+  
+  stat_summary(data = d[d$Condition == "PS.45", ],
+                aes(x = Time, y = cc, color = Condition, group = Condition), fun.y=median, geom="line", linetype = "dashed", size = 1
+               #, color = "#EDF8FB"
+               )+
+  #theme(legend.position = "bottom")+
+  labs(title = "with mean, no 45")+
+  ggsci::scale_color_locuszoom(),
+
+ggplot(d[d$Condition != "PS.45.orig" &
+           d$Condition != "PS.45", ], aes(x = Time, y = cc, color = Condition))+
+  # geom_point(shape = 1)+
+  # geom_point(alpha = 0.3)+
+  geom_hline(yintercept = 0, linetype = "dashed")+
+  stat_summary(aes(group=Condition), fun.y=mean, geom="line", size = 1)+
+  stat_summary(aes(group=Condition), fun.y=mean, geom="point", shape = 3, size = 3)+
+  
+  stat_summary(data = d[d$Condition == "PS.45", ],
+                aes(x = Time, y = cc, color = Condition, group = Condition), fun.y=median, geom="line", linetype = "dashed", size = 1
+               #, color = "#EDF8FB"
+               )+
+  #theme(legend.position = "bottom")+
+  labs(title = "with mean, no 45")+
+  scale_color_manual(values = c("#7FCDBB","#41B6C4","#1D91C0","#225EA8","#253494") )
+))
+
+```
+
+
+
+# Link to Frankenstein experiments
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# For SFN Abstract
+
+```{r}
+# median delta
+median(M.d.gj[M.d.gj$Condition %in% c("PS.22") & M.d.gj$Time == 60, "rc"], na.rm = T)
+
+
+median(M.d.gj[M.d.gj$Condition %in% c("PS.90") & M.d.gj$Time == 60, "rc"], na.rm = T)
+```
+
+
+
+```{r}
+
+response.var = "rc"
+input.df = M.gj[M.gj$Condition %in% c("PS.0", "PS.22", "PS.45", "PS.90"), ]
+nreps = 100
+use.seed = 432431
+mute.completion = FALSE
+mute.time = FALSE
+
+  
+  
+  tic <- Sys.time()
+
+  # Transform the data so that it's ready for the test
+  input.df <- input.df[!(is.na(input.df[[response.var]])), ]
+  input.df$response.var <- input.df[[response.var]]
+  # input.df$Time <- as.factor(input.df$Time)
+  input.df$interact <- interaction(input.df$Experiment, input.df$Inj_Cell)
+
+  input.df$Phase <- "None"
+  
+  input.df[input.df$Condition %in% c("PS.0"),  "Phase"] <- "0"
+  input.df[input.df$Condition %in% c("PS.22"), "Phase"] <- "22"
+  input.df[input.df$Condition %in% c("PS.45"), "Phase"] <- "45"
+  input.df[input.df$Condition %in% c("PS.90"), "Phase"] <- "90"
+  
+
+  input.df <- input.df[, c("response.var", "interact", "Time", "Phase"
+                           # , "Amp"
+                           )]
+
+  # First model with observed data
+  fm <- lme(response.var ~ Time * Phase, random = ~1 | interact, method = "ML", data = input.df)
+  stats.table <- anova.lme(fm)
+```
+
+
+```{r}
+response.var = "rc"
+input.df = M.gj[M.gj$Condition %in% c("PS.0.High.Amp", "PS.0", "PS.22", "PS.22.High.Amp"), ]
+mute.time = FALSE
+
+
+tic <- Sys.time()
+
+# Transform the data so that it's ready for the test
+input.df <- input.df[!(is.na(input.df[[response.var]])), ]
+input.df$response.var <- input.df[[response.var]]
+# input.df$Time <- as.factor(input.df$Time)
+input.df$interact <- interaction(input.df$Experiment, input.df$Inj_Cell)
+
+input.df$Phase <- "None"
+input.df[input.df$Condition %in% c("PS.22", "PS.22.High.Amp"), "Phase"] <- "Offset"
+input.df[input.df$Condition %in% c("PS.0", "PS.0.High.Amp"), "Phase"] <- "Normal"
+input.df$Amp <- "None"
+input.df[input.df$Condition %in% c("PS.0.High.Amp", "PS.22.High.Amp"), "Amp"] <- "High"
+input.df[input.df$Condition %in% c("PS.0", "PS.22"), "Amp"] <- "Normal"
+
+input.df <- input.df[, c("response.var", "interact", "Time", "Phase", "Amp")]
+
+# First model with observed data
+fm <- lme(response.var ~ Time * Phase + Time * Amp + Phase * Amp, random = ~1 | interact, method = "ML", data = input.df)
+stats.table <- anova.lme(fm)
+```
+
+

@@ -1,0 +1,883 @@
+---
+title: "convert_xlsx_to_rds"
+author: "Daniel R. Kick"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("readxl")
+library("tidyverse")
+# devtools::load_all(".")
+library("here")
+source(here("R", "01OrganizeData.R"))
+
+write.out.data = TRUE
+time.to.sleep = 1
+working.dir <- getwd()#"E:/esynvmod_2/"#"C:/Users/drk8b9/Desktop/esynvmod_2"
+```
+
+# Read in data ----------------------------------------------------------------
+The data to be updated comes in two formats, legacy format (from the summer and early fall of 2017) and modern format (from the fall of 2017 to the present). The former strives to group multiple experiments into a single spreadsheet with each spreadsheet containing a single type of data (e.g. current clamp recordings). The later focuses instead on making as few manual changes as possible to the output that Clampfit provides. The data is therefore treated separately at first.
+
+```{r eval=TRUE, read and reformat legacy format data}
+#handle data with the old format (non data/metadata organized)
+iclamp <- as.data.frame(read.csv(paste0(getwd(), "/inst/extdata/deprecated_format/iclamp3_processed_man.csv")))
+vclamp <- as.data.frame(read.csv(paste0(getwd(), "/inst/extdata/deprecated_format/vclamp3_processed_man.csv")))
+
+current <- as.data.frame(read.csv(paste0(getwd(), "/inst/extdata/deprecated_format/current2.csv")))
+
+#Target names:
+#TECC
+#"X", "experiment", "time", "injection", "file", "trace", "trace_start", "IN4_mean", "IN6_mean", "IN7_mean", "IN9_mean", "IN11_mean", "IN12_mean", "IN4_base", "IN6_base", "IN7_base", "IN9_base", "IN11_base", "IN12_base", "filepath", "notes", "phase_offset", "IN4_id", "IN9_id"
+#converted to
+#"Experiment", "Recording", "Trace", "TraceStart", "IN4_mean", "IN6_mean", "IN7_mean", "IN9_mean", "IN11_mean", "IN12_mean", "IN4_baseline", "IN6_baseline", "IN7_baseline", "IN9_baseline", "IN11_baseline", "IN12_baseline", "path", "TimeExposed", "Condition", "IN4", "IN9"
+iclamp <- iclamp[, c("experiment", "file", "trace", "trace_start", 
+                     "IN4_mean", "IN6_mean", "IN7_mean", "IN9_mean", "IN11_mean", "IN12_mean", 
+                     "IN4_base", "IN6_base", "IN7_base", "IN9_base", "IN11_base", "IN12_base", 
+                     "filepath", "time", "phase_offset", "IN4_id", "IN9_id")]
+
+#alter file col so that it has just the suffix of the filename (tevc$Recording)
+iclamp$file <- gsub(pattern = ".+_", replacement = "", iclamp$file)
+iclamp$file <- gsub(pattern = "\\.abf", replacement = "", iclamp$file)
+
+names(iclamp) <- c("Experiment", "Recording", "Trace", "Trace Start", 
+                   "IN4_mean", "IN6_mean", "IN7_mean", "IN9_mean", "IN11_mean", "IN12_mean", 
+                   "IN4_baseline", "IN6_baseline", "IN7_baseline", "IN9_baseline", "IN11_baseline", "IN12_baseline", 
+                   "path", "Time Exposed", "Condition", "IN4", "IN9")
+iclamp <- iclamp[!is.na(iclamp$Condition), ]
+
+iclamp[iclamp$Condition == 0, "Condition"] <- "PS.0.orig"
+iclamp[iclamp$Condition == 45, "Condition"] <- "PS.45.orig"
+iclamp[iclamp$Condition == 90, "Condition"] <- "PS.90.orig"
+iclamp[iclamp$Condition == 180, "Condition"] <- "PS.180.orig"
+
+iclamp <- iclamp %>% mutate(Experiment = as.character(Experiment)) %>% mutate(Recording = as.character(Recording)) %>% mutate(Trace = as.numeric(Trace)) %>% mutate(path = as.character(path)) %>% mutate(IN4 = as.character(IN4)) %>% mutate(IN9 = as.character(IN9))
+
+#TEVC
+
+#> names(vclamp)
+#"X", "experiment", "time", "injection", "file", "trace", "trace_start", "IN4_mean", "IN7_mean", "IN9_mean", "IN12_mean", "IN4_base", "IN7_base", "IN9_base", "IN12_base", "filepath", "notes", "phase_offset", "IN4_id", "IN9_id"
+#> names(df.tevc_gj)
+#"Experiment", "Recording", "Trace", "TraceStart", "IN4_mean", "IN7_mean", "IN9_mean", "IN12_mean", "IN4_baseline", "IN7_baseline", "IN9_baseline", "IN12_baseline", "path", "TimeExposed", "Condition", "IN4", "IN9"
+
+vclamp <- vclamp[, c("experiment", "file", "trace", "trace_start", 
+                 "IN4_mean", "IN7_mean", "IN9_mean", "IN12_mean", 
+                 "IN4_base", "IN7_base", "IN9_base", "IN12_base", 
+                 "filepath", "time", "phase_offset", "IN4_id", "IN9_id")]
+
+#alter file col so that it has just the suffix of the filename (tevc$Recording)
+vclamp$file <- gsub(pattern = ".+_", replacement = "", vclamp$file)
+vclamp$file <- gsub(pattern = "\\.abf", replacement = "", vclamp$file)
+vclamp$file <- as.character(vclamp$file)
+
+names(vclamp) <- c("Experiment", "Recording", "Trace", "Trace Start", 
+                 "IN4_mean", "IN7_mean", "IN9_mean", "IN12_mean", 
+                 "IN4_baseline", "IN7_baseline", "IN9_baseline", "IN12_baseline", 
+                 "path", "Time Exposed", "Condition", "IN4", "IN9")
+
+vclamp[vclamp$Condition == 0, "Condition"] <- "PS.0.orig"
+vclamp[vclamp$Condition == 45, "Condition"] <- "PS.45.orig"
+vclamp[vclamp$Condition == 90, "Condition"] <- "PS.90.orig"
+vclamp[vclamp$Condition == 180, "Condition"] <- "PS.180.orig"
+
+vclamp <- vclamp %>% mutate(Experiment = as.character(Experiment)) %>% mutate(Recording = as.character(Recording)) %>% mutate(Trace = as.numeric(Trace)) %>% mutate(path = as.character(path)) %>% mutate(IN4 = as.character(IN4)) %>% mutate(IN9 = as.character(IN9))
+
+#CURRENT
+#"X", "experiment", "time", "a.file", "htk.file", "IN4.a.peak_mV", "IN4.a.peak_nA", "IN4.a.end_mV", "IN4.a.end_nA", "IN4.htk.peak_mV", "IN4.htk.peak_nA", "IN4.htk.end_mV", "IN4.htk.end_nA", "IN4.rin_used", "IN9.a.peak_mV", "IN9.a.peak_nA", "IN9.a.end_mV", "IN9.a.end_nA", "IN9.htk.peak_mV", "IN9.htk.peak_nA", "IN9.htk.end_mV", "IN9.htk.end_nA", "IN9.rin_used", "notes", "phase_offset", "IN4_id", "IN9_id"
+current.a <- current[, c("experiment", "a.file", 
+                         "IN4.a.peak_mV", "IN4.a.peak_nA", "IN9.a.peak_mV", "IN9.a.peak_nA", 
+                         "IN4.a.end_mV", "IN4.a.end_nA", "IN9.a.end_mV", "IN9.a.end_nA", 
+                         "time", "phase_offset", "IN4_id", "IN9_id")]
+names(current.a) <- c("Experiment", "Recording", 
+                      "IN4_mV_peak", "IN7_nA_peak", "IN9_mV_peak", "IN12_nA_peak", 
+                      "IN4_mV_end", "IN7_nA_end", "IN9_mV_end", "IN12_nA_end", 
+                      "Time Exposed", "Condition", "IN4", "IN9")
+current.a[current.a$Condition == 0, "Condition"] <- "PS.0.orig"
+current.a[current.a$Condition == 45, "Condition"] <- "PS.45.orig"
+current.a[current.a$Condition == 90, "Condition"] <- "PS.90.orig"
+current.a[current.a$Condition == 180, "Condition"] <- "PS.180.orig"
+current.a <- current.a %>% mutate(Experiment = as.character(Experiment)) %>% mutate(Recording = as.character(Recording)) %>% mutate(IN4 = as.character(IN4)) %>% mutate(IN9 = as.character(IN9))
+
+#A
+#"Experiment", "Recording", "IN4_mV_peak", "IN7_nA_peak", "IN9_mV_peak", "IN12_nA_peak", "IN4_mV_end", "IN7_nA_end", "IN9_mV_end", "IN12_nA_end", "TimeExposed", "Condition", "IN4", "IN9"
+
+#HTK
+#"Experiment", "Recording", "IN4_mV_peak", "IN7_nA_peak", "IN9_mV_peak", "IN12_nA_peak", "IN4_mV_end", "IN7_nA_end", "IN9_mV_end", "IN12_nA_end", "IN4_rin", "IN9_rin", "TimeExposed", "Condition", "IN4", "IN9"
+current.htk <- current[, c("experiment", "htk.file", 
+                           "IN4.htk.peak_mV", "IN4.htk.peak_nA", "IN9.htk.peak_mV", "IN9.htk.peak_nA", 
+                           "IN4.htk.end_mV", "IN4.htk.end_nA", "IN9.htk.end_mV", "IN9.htk.end_nA", 
+                           "IN4.rin_used", "IN9.rin_used", 
+                           "time", "phase_offset", "IN4_id", "IN9_id")]
+names(current.htk) <- c("Experiment", "Recording", 
+                        "IN4_mV_peak", "IN7_nA_peak", "IN9_mV_peak", "IN12_nA_peak", 
+                        "IN4_mV_end", "IN7_nA_end", "IN9_mV_end", "IN12_nA_end", 
+                        "IN4_rin", "IN9_rin", 
+                        "Time Exposed", "Condition", "IN4", "IN9")
+current.htk[current.htk$Condition == 0, "Condition"] <- "PS.0.orig"
+current.htk[current.htk$Condition == 45, "Condition"] <- "PS.45.orig"
+current.htk[current.htk$Condition == 90, "Condition"] <- "PS.90.orig"
+current.htk[current.htk$Condition == 180, "Condition"] <- "PS.180.orig"
+current.htk <- current.htk %>% mutate(Experiment = as.character(Experiment)) %>% mutate(Recording = as.character(Recording)) %>% mutate(IN4_rin = as.character(IN4_rin)) %>% mutate(IN9_rin = as.character(IN9_rin)) %>% mutate(IN4 = as.character(IN4)) %>% mutate(IN9 = as.character(IN9))
+
+print("Phase shift data is ready to rbind!")
+```
+
+
+
+```{r Read in modern format data}
+#Look in 
+# path.prefix <- paste0(as.character(getwd()),"/inst/extdata/modern_format/")
+
+# path.prefix <- paste0("C:/Users/Daniel/Desktop/Test Data/modern_format_dc_og/") #TODO When satisfied with plots, mv data to within the package
+# path.prefix <- paste0("C:/Users/Daniel/Desktop/Test Data/modern_format_thesis/")
+path.prefix <- paste0("C:/Users/Daniel/Desktop/Test Data/modern_format_all_in_one/") # does this fix the dropped data from modern_format? (possibly due to empty rows)
+
+
+
+xlsx.list.to.import <- c(list.files(path.prefix))
+xlsx.sheets.to.import <- c("tecc_gj", "tevc_gj", "htk_ls", "a", "metadata")
+#In all files get all sheets (returns a nested list) 
+xlsx.list <- purrr::map(xlsx.list.to.import, 
+                        function(x) {
+                          purrr::map(xlsx.sheets.to.import,
+                                     function(y) {
+                                      print(paste(as.character(x), as.character(y)))
+                                      as.data.frame(readxl::read_excel(
+                                         paste(path.prefix, x, sep = "/"), sheet = y)) 
+                                      
+                                      #use.times <- nrow(temp)
+                                      #print(use.times)
+                                      #temp %>% mutate("experiment.name" = rep(as.character(xlsx.list.to.import[[x]]), times = use.times))
+                                      
+                                       } 
+                                     ) 
+                          }
+                        )
+
+#produce aggregate dataframes for each sheet
+xlsx.list <- purrr::transpose(xlsx.list)
+
+
+aggregated.df.list <- map(1:length(xlsx.list), 
+                          function(x){
+                            
+                            
+  how.many.rows <- map(seq_along(xlsx.list[[x]]), 
+                       function(y){
+    nrow(xlsx.list[[x]][[y]])
+  }) %>% unlist()
+  
+  
+  how.many.cols <- map(seq_along(xlsx.list[[x]]), 
+                       function(y){
+    ncol(xlsx.list[[x]][[y]])
+  }) %>% unlist() %>% max()
+  
+  output <- data.frame(matrix(nrow = sum(how.many.rows), ncol = how.many.cols))
+  names(output) <- names(xlsx.list[[x]][[1]][1,])
+
+  for(y in seq(1, length(xlsx.list[[x]]))){
+    
+    # print(y)
+    
+    if(y == 1){
+      begin <-  1
+    } else {
+      begin <- sum(how.many.rows[1:(y-1)],1)
+    }
+    end <-  sum(how.many.rows[1:y])
+    #print(paste(begin, end))
+    #print(paste(x, y))
+    
+    # Added to prevent error from having no data in some sheets in an excel file
+    if (nrow(xlsx.list[[x]][[y]]) != 0 &
+        ncol(xlsx.list[[x]][[y]]) != 0){
+      
+      output[seq(from = begin, to = end),] <-  xlsx.list[[x]][[y]]
+      
+        }
+
+  }
+   return(output)
+  }
+)
+
+
+
+
+df.tecc_gj  <- aggregated.df.list[[1]]
+df.tevc_gj  <- aggregated.df.list[[2]]
+df.htk_ls   <- aggregated.df.list[[3]]
+df.a        <- aggregated.df.list[[4]]
+df.metadata <- aggregated.df.list[[5]]
+```
+
+```{r add metadata to each data.frame}
+df.tecc_gj <- add_metadata(df.tecc_gj, df.metadata)
+df.tevc_gj <- add_metadata(df.tevc_gj, df.metadata)
+df.htk_ls <- add_metadata(df.htk_ls, df.metadata)
+df.a <- add_metadata(df.a, df.metadata)
+```
+
+```{r eval=TRUE, join deprecated and modern format data}
+df.a <- mutate(df.a, IN9_mV_peak = as.numeric(IN9_mV_peak))
+
+df.tecc_gj <- full_join(df.tecc_gj, iclamp)
+df.tevc_gj <- full_join(df.tevc_gj, vclamp)
+df.a <- full_join(df.a, current.a)
+df.htk_ls <- full_join(df.htk_ls, current.htk)
+```
+
+```{r}
+#time points should be standardized, but some experiments might go on longer than others
+data.list <- list(df.tecc_gj, df.tevc_gj, df.htk_ls, df.a)
+time.points <- c(0, 20, 40, 60, 80)
+data.list <- map(seq_along(data.list), function(i){data.list[[i]][(data.list[[i]]$`Time Exposed` %in% time.points), ] })
+#remove any data that isn't from LC4 or LC5
+data.list <- map(seq_along(data.list), function(i){
+  data.list[[i]][(data.list[[i]]$IN4 %in% c("LC4", "LC5")) & (data.list[[i]]$IN9 %in% c("LC4", "LC5")), ] })
+```
+
+# Tidy each data type ---------------------------------------------------------
+
+## Prep two electrode current clamp data ======================================
+```{r}
+df.tecc_gj <- data.list[[1]]
+```
+
+
+```{r remove current injections where both cells are injected with less than expected}
+#Silent Control, Aberrant Wave, and Control Wave + TEA:
+#IN7_mean and IN12_mean show POSITIVE values instead of negative. This is a problem in the xlsx which since I copied directly from clampfit means the error is coming from there.
+#Inverted Wave
+#IN7_mean and IN12_mean include values around POSITIVE and NEGATIVE 2. If something chaned in clampfit, it may have been over the course of working with these files.
+#Phase Shift
+#Only negative values. No problems here.
+
+#to solve for the above, we'll take all injections with an absolute value above threshfold and set them as negative. Since this is current clamp anything positive should be dropped (from depricated protocols that stepped to positive voltages) or noise anyway
+
+#fix positive entries
+threshold.nA <- -0.9
+df.tecc_gj <- df.tecc_gj[!is.na(df.tecc_gj$IN7_mean), ]
+
+df.tecc_gj[abs(df.tecc_gj$IN7_mean) > abs(threshold.nA), "IN7_mean"] <- 
+  (abs(df.tecc_gj[abs(df.tecc_gj$IN7_mean) > abs(threshold.nA), "IN7_mean"]) * -1)
+
+df.tecc_gj <- df.tecc_gj[!is.na(df.tecc_gj$IN12_mean), ]
+df.tecc_gj[abs(df.tecc_gj$IN12_mean) > abs(threshold.nA), "IN12_mean"] <- 
+  (abs(df.tecc_gj[abs(df.tecc_gj$IN12_mean) > abs(threshold.nA), "IN12_mean"]) * -1)
+#Looks like the same problem exists with IN4_mean and IN9_mean: postive and negative values. Setting everything to negative to fix this. 
+df.tecc_gj[, "IN4_mean"] <- (abs(df.tecc_gj[, "IN4_mean"]) * -1)
+df.tecc_gj[, "IN9_mean"] <- (abs(df.tecc_gj[, "IN9_mean"]) * -1)
+#drop rows where neither electrode was injecting current
+df.tecc_gj <- df.tecc_gj[df.tecc_gj$IN7_mean < threshold.nA |
+                                   df.tecc_gj$IN12_mean < threshold.nA ,]
+```
+
+```{r figure out which cell is being injected into }
+df.tecc_gj$IN4 <- as.character(df.tecc_gj$IN4)
+df.tecc_gj$IN9 <- as.character(df.tecc_gj$IN9)
+
+df.tecc_gj[,"Inj_Cell"] <- "LC0"
+df.tecc_gj[abs(df.tecc_gj$IN7_mean) > abs(df.tecc_gj$IN12_mean), "Inj_Cell"] <- as.character(df.tecc_gj[abs(df.tecc_gj$IN7_mean) > abs(df.tecc_gj$IN12_mean), "IN4"])
+df.tecc_gj[abs(df.tecc_gj$IN7_mean) < abs(df.tecc_gj$IN12_mean), "Inj_Cell"] <- as.character(df.tecc_gj[abs(df.tecc_gj$IN7_mean) < abs(df.tecc_gj$IN12_mean), "IN9"])
+```
+
+```{r get median deflections for everything in tecc}
+df.tecc_gj <- df.tecc_gj %>% mutate(observation = paste(
+  as.character(df.tecc_gj[, c("Experiment")]),
+  as.character(df.tecc_gj[, c("Time Exposed")]),
+  as.character(df.tecc_gj[, c("Inj_Cell")]), sep = "."))
+observations <- unique(df.tecc_gj$observation)
+targets <- c("IN4_mean","IN6_mean","IN7_mean","IN9_mean","IN11_mean","IN12_mean","IN4_baseline","IN6_baseline","IN7_baseline","IN9_baseline","IN11_baseline","IN12_baseline")
+
+for (i in seq_along(observations)){
+  df.tecc_gj[df.tecc_gj$observation == observations[i], targets] <- lapply(df.tecc_gj[df.tecc_gj$observation == observations[i], targets] , median)
+}
+#dispose of observation col
+df.tecc_gj <- df.tecc_gj[, !(names(df.tecc_gj) %in% c("observation"))]
+#get unique values. Here I'm usng duplicated instead of unique so that we retain the two cols denoted below. This is merely to keep a consistent format with the tevc data. 
+df.tecc_gj <- df.tecc_gj[!duplicated(df.tecc_gj[, !(names(df.tecc_gj) %in% c("Trace", "Trace Start"))]), ]
+```
+
+
+
+### Calculate Resistances per Bennett 1966 ####################################
+Apparant Cell resistances:
+$$r_{11}=\frac{v_1}{i_1}$$
+```{r apparent resist}
+#when inj IN7...
+df.tecc_gj[abs(df.tecc_gj$IN7_mean) > abs(df.tecc_gj$IN12_mean), "r11"] <- df.tecc_gj[abs(df.tecc_gj$IN7_mean) > abs(df.tecc_gj$IN12_mean), "IN4_mean"] / df.tecc_gj[abs(df.tecc_gj$IN7_mean) > abs(df.tecc_gj$IN12_mean), "IN7_mean"]
+
+#when inj IN12...
+df.tecc_gj[abs(df.tecc_gj$IN7_mean) < abs(df.tecc_gj$IN12_mean), "r11"] <- df.tecc_gj[abs(df.tecc_gj$IN7_mean) < abs(df.tecc_gj$IN12_mean), "IN9_mean"] / df.tecc_gj[abs(df.tecc_gj$IN7_mean) < abs(df.tecc_gj$IN12_mean), "IN12_mean"]
+```
+Transfer resistances:
+$$r_{12}=\frac{v_2}{i_1}$$
+```{r transfer resist}
+#when inj IN7...
+df.tecc_gj[abs(df.tecc_gj$IN7_mean) > abs(df.tecc_gj$IN12_mean), "r12"] <- df.tecc_gj[abs(df.tecc_gj$IN7_mean) > abs(df.tecc_gj$IN12_mean), "IN9_mean"] / df.tecc_gj[abs(df.tecc_gj$IN7_mean) > abs(df.tecc_gj$IN12_mean), "IN7_mean"]
+
+#when inj IN12...
+df.tecc_gj[abs(df.tecc_gj$IN7_mean) < abs(df.tecc_gj$IN12_mean), "r12"] <- df.tecc_gj[abs(df.tecc_gj$IN7_mean) < abs(df.tecc_gj$IN12_mean), "IN4_mean"] / df.tecc_gj[abs(df.tecc_gj$IN7_mean) < abs(df.tecc_gj$IN12_mean), "IN12_mean"]
+```
+$$r_1= \frac{r_{11}*r_{22} - r_{12}^2}{r_{22} - r_{12}}$$
+$$r_c = \frac{r_{11}*r_{22} - r_{12}^2}{r_{12}}$$
+
+```{r solve for other resistances}
+# tic <- Sys.time()
+# df.tecc_gj <- solve_for_resistances(input.df = df.tecc_gj)
+# toc <- (Sys.time() - tic)
+# # 8.411 mins
+
+tic1 <- Sys.time()
+df.tecc_gj <- solve_for_resistances2(
+  df = df.tecc_gj,
+  v1 = "IN4_mean",
+  i1 = "IN7_mean",
+  v2 = "IN9_mean",
+  i2 = "IN12_mean",
+  exp = "Experiment",
+  rec = "Recording"
+)
+toc1 <- (Sys.time() - tic1)
+# 0.131 secs
+# print(toc1)
+```
+
+```{r add input resistance and coupling coefficient, eval=TRUE, }
+df.tecc_gj[abs(df.tecc_gj$IN7_mean) > abs(df.tecc_gj$IN12_mean), "Coupling Coefficient"] <- 
+  df.tecc_gj[abs(df.tecc_gj$IN7_mean) > abs(df.tecc_gj$IN12_mean), "IN9_mean"] /
+  df.tecc_gj[abs(df.tecc_gj$IN7_mean) > abs(df.tecc_gj$IN12_mean), "IN4_mean"]
+
+df.tecc_gj[abs(df.tecc_gj$IN7_mean) < abs(df.tecc_gj$IN12_mean), "Coupling Coefficient"] <- 
+  df.tecc_gj[abs(df.tecc_gj$IN7_mean) < abs(df.tecc_gj$IN12_mean), "IN4_mean"] / 
+  df.tecc_gj[abs(df.tecc_gj$IN7_mean) < abs(df.tecc_gj$IN12_mean), "IN9_mean"]
+
+
+df.tecc_gj[abs(df.tecc_gj$IN7_mean) > abs(df.tecc_gj$IN12_mean), "Input Resistance"] <- 
+  df.tecc_gj[abs(df.tecc_gj$IN7_mean) > abs(df.tecc_gj$IN12_mean), "IN4_mean"] / 
+  df.tecc_gj[abs(df.tecc_gj$IN7_mean) > abs(df.tecc_gj$IN12_mean), "IN7_mean"]
+
+df.tecc_gj[abs(df.tecc_gj$IN7_mean) < abs(df.tecc_gj$IN12_mean), "Input Resistance"] <- 
+  df.tecc_gj[abs(df.tecc_gj$IN7_mean) < abs(df.tecc_gj$IN12_mean), "IN9_mean"] / 
+  df.tecc_gj[abs(df.tecc_gj$IN7_mean) < abs(df.tecc_gj$IN12_mean), "IN12_mean"]
+```
+
+```{r Add cols of the initial values so that normalized data is easy to get}
+# df.tecc_gj$r11.0 <- 0
+# df.tecc_gj$r12.0 <- 0
+# df.tecc_gj$r1.0 <- 0
+# df.tecc_gj$rc.0 <- 0
+# df.tecc_gj$`Coupling Coefficient.0` <- 0
+# df.tecc_gj$`Input Resistance.0` <- 0
+# 
+# df.tecc_gj$interact <- interaction(df.tecc_gj$Experiment, df.tecc_gj$Inj_Cell)
+# tic <- Sys.time()
+# for(INTERACT in unique(df.tecc_gj$interact)){
+#   #INTERACT =  "170623b.LC5"
+#   #INTERACT = "180110.LC4"
+#   #print(INTERACT)
+#   df.tecc_gj[df.tecc_gj$interact ==  INTERACT, 
+#              c("r11.0", "r12.0", "r1.0", "rc.0", "Coupling Coefficient.0", "Input Resistance.0")] <- lapply(df.tecc_gj[df.tecc_gj$interact ==  INTERACT & df.tecc_gj$`Time Exposed` == 0, c("r11", "r12", "r1", "rc", "Coupling Coefficient", "Input Resistance")], mean)
+# }
+# print(Sys.time() - tic)
+
+#TODO Removing this might cause things to break. # 20-03-27-13:28
+
+```
+
+```{r drop tecc experiments which end early}
+df.tecc_gj <- check_start_end(input.df = df.tecc_gj, start.time = 0, end.time = 60)
+Sys.sleep(time.to.sleep)
+```
+
+```{r add interact to tecc}
+df.tecc_gj <- df.tecc_gj %>% mutate(interact = paste(Experiment, Inj_Cell, sep = "."))
+```
+
+
+## Prep two electrode voltage clamp GJ data ===================================
+```{r}
+df.tevc_gj <- data.list[[2]]
+```
+
+
+```{r convert cell id cols to chr}
+  # Ensure channel cell ids are characters, not factors
+df.tevc_gj$IN4 <- as.character(df.tevc_gj$IN4)
+df.tevc_gj$IN9 <- as.character(df.tevc_gj$IN9)
+
+# Fix clampfit col issue}
+df.tevc_gj <- find_and_fix_switched_cols(input.df = df.tevc_gj)
+```
+
+```{r infer mv steps 2, }
+#Spray, Harris, and Bennett 1979 states:
+#"This transjunctional current (Ij) injected into the second cell gives a direct measure of junctional conductance when dividded by the the magnitude of the step change in transjunctional voltage"
+df.tevc_gj <- df.tevc_gj[!is.na(df.tevc_gj$IN4_mean), ]
+df.tevc_gj <- df.tevc_gj[!is.na(df.tevc_gj$IN9_mean), ]
+
+df.tevc_gj$inj_in_IN4 <- abs(df.tevc_gj$IN4_mean) > abs(df.tevc_gj$IN9_mean) #So we can appropriately apply the formula
+
+df.tevc_gj$diff_in_means <- abs(df.tevc_gj$IN4_mean) - abs(df.tevc_gj$IN9_mean) #so we can drop the ones where both are held at 60mV
+df.tevc_gj <- df.tevc_gj[abs(df.tevc_gj$diff_in_means) > 6,] #drop the 0mv step and the +/-5mV steps
+
+#Apply Spray, Harris, and Bennett's calculation
+df.tevc_gj$gj <- 0
+df.tevc_gj[df.tevc_gj$inj_in_IN4 == FALSE, "gj"] <- df.tevc_gj[df.tevc_gj$inj_in_IN4 == FALSE, "IN7_mean"] / df.tevc_gj[df.tevc_gj$inj_in_IN4 == FALSE, "IN9_mean"]
+df.tevc_gj[df.tevc_gj$inj_in_IN4 == TRUE, "gj"] <- df.tevc_gj[df.tevc_gj$inj_in_IN4 == TRUE, "IN12_mean"] / df.tevc_gj[df.tevc_gj$inj_in_IN4 == TRUE, "IN4_mean"]
+
+
+#Add this column for later
+df.tevc_gj[df.tevc_gj$inj_in_IN4 == TRUE, "Inj_Cell"] <- df.tevc_gj[df.tevc_gj$inj_in_IN4 == TRUE, "IN4"]
+df.tevc_gj[df.tevc_gj$inj_in_IN4 == FALSE, "Inj_Cell"] <- df.tevc_gj[df.tevc_gj$inj_in_IN4 == FALSE, "IN9"]
+```
+
+```{r add directionality}
+df.tevc_gj[df.tevc_gj$Inj_Cell == "LC4", "Direction"] <- "LC4 -> LC5"
+df.tevc_gj[df.tevc_gj$Inj_Cell == "LC5", "Direction"] <- "LC5 -> LC4"
+
+df.tevc_gj[, "interact"] <- interaction(df.tevc_gj$Experiment, df.tevc_gj$Direction)
+```
+
+```{r remove nas}
+df.tevc_gj <- df.tevc_gj[!is.na(df.tevc_gj),]
+```
+
+```{r drop tevc experiments which end early}
+df.tevc_gj <- check_start_end(input.df = df.tevc_gj, start.time = 0, end.time = 60)
+Sys.sleep(time.to.sleep)
+```
+
+```{r add interact to tevc}
+df.tevc_gj <- df.tevc_gj %>% mutate(interact = paste(Experiment, Inj_Cell, sep = "."))
+```
+
+```{r visualize each condition eval=FALSE, include=FALSE}
+# conditions <- df.tevc_gj$Condition %>% unique()
+# 
+# walk(seq_along(conditions), function(i){
+#   #i=5
+#   
+#   p1 <- ggplot(df.tevc_gj[df.tevc_gj$inj_in_IN4 == TRUE & df.tevc_gj$Condition == conditions[i], ], 
+#                aes(x = IN4_mean, y = gj, group = interact, color = interact))+
+#     geom_point()+
+#     geom_smooth(se = FALSE)+
+#     facet_grid(.~`Time Exposed`)+
+#     theme(legend.position = "")+
+#     labs(title = paste(as.character(conditions[i]), "IN4"))
+#   
+#   p2 <- ggplot(df.tevc_gj[df.tevc_gj$inj_in_IN4 == FALSE & df.tevc_gj$Condition == conditions[i], ], 
+#                aes(x = IN9_mean, y = gj, group = interact, color = interact))+
+#     geom_point()+
+#     geom_smooth(se = FALSE)+
+#     facet_grid(.~`Time Exposed`)+
+#     theme(legend.position = "")+
+#     labs(title = paste(as.character(conditions[i]), "IN9"))
+# 
+#   #plotly::ggplotly(p1)
+#   #plotly::ggplotly(p2)
+# 
+#   p3 <- cowplot::plot_grid(plotlist = list(p1, p2))
+#   
+#   plot(p3)
+#   # ggsave(plot = p3, 
+#   #        filename = paste0(as.character(conditions[i]),".pdf"),
+#   #        path = "C:/Users/drk8b9/Desktop/r_plots/")
+# })
+
+```
+
+
+```{r collapse to medians}
+#Because the membrane is passive in this region of voltage
+interacts <- unique(df.tevc_gj$interact)
+for (i in seq_along(interacts)){
+  times <- unique(  df.tevc_gj[df.tevc_gj$interact == interacts[i], "Time Exposed"])
+  
+  for (j in seq_along(times)){
+    median.value <- df.tevc_gj[df.tevc_gj$interact == interacts[i] &
+                 df.tevc_gj$`Time Exposed` == times[j], "gj"] %>% median()
+    
+    df.tevc_gj[df.tevc_gj$interact == interacts[i] &
+                 df.tevc_gj$`Time Exposed` == times[j], "gj"] <- median.value
+  }
+}
+#convert to all positives
+df.tevc_gj$gj <- abs(df.tevc_gj$gj)
+```
+
+
+```{r drop unneeded cols}
+#drop unneeded cols
+df.tevc_gj <- df.tevc_gj[, !(names(df.tevc_gj) %in% c("Trace", "Trace Start", "IN4_mean", "IN7_mean", "IN9_mean", "IN12_mean", "IN4_baseline", "IN7_baseline", "IN9_baseline", "IN12_baseline", "path", "IN4", "IN9", "inj_in_IN4", "diff_in_means"))]
+
+#deduplicate
+df.tevc_gj <- df.tevc_gj[!duplicated(df.tevc_gj),]
+```
+
+
+
+
+
+
+## Prep two electrode voltage clamp HTK data ==================================
+
+
+```{r drop tecc experiments which end early, eval=FALSE, include=FALSE}
+htk <- data.list[[3]]
+
+htk.peak <- sep_peak_end(input.df = htk, current.type = "htk")[[1]] %>% 
+  simplify_df() %>%
+  stack_channels()
+
+htk.peak$Inj_Cell <- htk.peak$Cell #needed for check_start_end
+htk.peak <- check_start_end(input.df = htk.peak, start.time = 0, end.time = 60)
+Sys.sleep(time.to.sleep)
+htk.peak <- htk.peak[, !(names(htk.peak) %in% c("Inj_Cell"))]
+
+htk.end <- sep_peak_end(input.df = htk, current.type = "htk")[[2]] %>%
+  simplify_df() %>% 
+  stack_channels()
+
+htk.end$Inj_Cell <- htk.end$Cell #needed for check_start_end
+htk.end <- check_start_end(input.df = htk.end, start.time = 0, end.time = 60)
+Sys.sleep(time.to.sleep)
+htk.end <- htk.end[, !(names(htk.end) %in% c("Inj_Cell"))]
+
+htk.peak$interact <- interaction(htk.peak$Experiment, htk.peak$Cell)
+htk.end$interact <- interaction(htk.end$Experiment, htk.end$Cell)
+```
+
+```{r}
+htk <- data.list[[3]]
+
+stack_peak_end_cols <- function(input.df = htk, type = c("htk")){
+  if(type == "htk"){
+  
+    IN4 <- input.df[, c("Experiment","Recording","Time Exposed","Condition","IN4",
+                        "IN9_mV_peak","IN12_nA_peak","IN9_mV_end","IN12_nA_end","IN9_rin")]
+    IN9 <- input.df[, c("Experiment","Recording","Time Exposed","Condition","IN9",
+                        "IN4_mV_peak","IN7_nA_peak","IN4_mV_end","IN7_nA_end","IN4_rin")]
+    names(IN4) <- c("Experiment","Recording","Time Exposed","Condition","Inj_Cell",
+                    "peak.mV","peak.nA","end.mV","end.nA","subtracted.rin")
+    names(IN9) <- c("Experiment","Recording","Time Exposed","Condition","Inj_Cell",
+                    "peak.mV","peak.nA","end.mV","end.nA","subtracted.rin")
+  } else if (type == "a"){
+    IN4 <- input.df[, c("Experiment","Recording","Time Exposed","Condition","IN4",
+                        "IN9_mV_peak","IN12_nA_peak","IN9_mV_end","IN12_nA_end")]
+    IN9 <- input.df[, c("Experiment","Recording","Time Exposed","Condition","IN9",
+                        "IN4_mV_peak","IN7_nA_peak","IN4_mV_end","IN7_nA_end")]
+    names(IN4) <- c("Experiment","Recording","Time Exposed","Condition","Inj_Cell",
+                    "peak.mV","peak.nA","end.mV","end.nA")
+    names(IN9) <- c("Experiment","Recording","Time Exposed","Condition","Inj_Cell",
+                    "peak.mV","peak.nA","end.mV","end.nA")
+  } else { print(warning("type is unknown"))}
+  output.df <- full_join(IN4, IN9)
+}
+
+htk <- stack_peak_end_cols(htk, type = c("htk"))
+
+```
+
+
+## Prepare A type =============================================================
+```{r drop a experiments which end early, eval=FALSE, include=FALSE}
+a <- data.list[[4]]
+#read in data
+#drop entries that don't go the full lenght of the experiment
+
+a.peak <- sep_peak_end(input.df = a, current.type = "a")[[1]] %>% 
+  simplify_df() %>% 
+  stack_channels()
+
+a.peak$Inj_Cell <- a.peak$Cell #needed for check_start_end
+a.peak <- check_start_end(input.df = a.peak, start.time = 0, end.time = 60)
+Sys.sleep(time.to.sleep)
+a.peak <- a.peak[, !(names(a.peak) %in% c("Inj_Cell"))]
+
+a.end <- sep_peak_end(input.df = a, current.type = "a")[[2]] %>%
+  simplify_df() %>% 
+  stack_channels()
+
+a.end$Inj_Cell <- a.end$Cell #needed for check_start_end
+a.end <- check_start_end(input.df = a.end, start.time = 0, end.time = 60)
+Sys.sleep(time.to.sleep)
+a.end <- a.end[, !(names(a.end) %in% c("Inj_Cell"))]
+
+a.peak$interact <- interaction(a.peak$Experiment, a.peak$Cell)
+a.end$interact <- interaction(a.end$Experiment, a.end$Cell)
+```
+
+```{r}
+a <- data.list[[4]]
+a <- a %>% mutate(IN9_mV_peak = as.numeric(IN9_mV_peak))
+a <- stack_peak_end_cols(input.df = a, type = c("a"))
+```
+
+
+
+
+
+# Port over tevc k+ prep from thesis ----
+# Settings
+
+```{r}
+# Run settings ----
+## Preparation ====
+### I_A & I_{HTK} ####
+# winnow down to linear estimates of an approximately linear range
+mV.lower.bound = -30
+mV.upper.bound = 5
+
+# resample.results = T # If not TRUE resampled model list will be loaded from a previous save
+# resample.nreps <- 1e4 #FIXME
+```
+
+# Read in and aggregate data
+
+```{r}
+# ia   <- readRDS(file = here("data", "Ch2", "a.rds"))
+# ihtk <- readRDS(file = here("data", "Ch2", "htk.rds"))
+
+ia <- a
+ihtk <- htk
+
+update_names <- function(
+  input.df = tecc,
+  condition.col = "Condition",
+  replacement.list = list(
+    "Aberrant Depol" = "PS.0.High.Amp", 
+    "Inverted Wave" = "Inv", 
+    "0_deg" = "PS.0", 
+    "TEA_ControlWave" = "PS.0.TEA", 
+    "TEA_Silent" = "Silent.TEA", 
+    # "Wash TEA" = , 
+    "Aberrant_Depol_22.5_deg" = "PS.22.High.Amp", 
+    "PS.22.orig" = "PS.22.orig", 
+    # "" = "BLANK", 
+    "22.5_degrees" = "PS.22", 
+    "11.2_degrees" = "PS.11", 
+    "rep 45 Degree" = "PS.45", 
+    "rep 90 Degree" = "PS.90", 
+    "hold_at_-53mV" = "Silent.53mV", 
+    "PS.0.orig" = "PS.0.orig", 
+    "PS.180.orig" = "PS.180.orig", 
+    "PS.90.orig" = "PS.90.orig", 
+    "PS.45.orig" = "PS.45.orig", 
+    "HA 90 Degree Cd" = "PS.90.HA.Cd", 
+    "HA 90 Degree" = "PS.90.HA",
+    
+    "Silent.TEA" = "PS.0.TEA",
+    "Wash TEA" = "Wash"
+  )
+){
+  
+  ## Rename conditions ====
+  #NOTE: this needs to be changed if new conditions are added
+  
+  # I've updated this so it works more like a python dict. This makes it easier to update if need be.
+  present.conditions <- unique(input.df[[condition.col]])
+  
+  # Check to make sure that all the important conditions have updated names
+  if (length(names(replacement.list)[!(names(replacement.list) %in% present.conditions)]) > 0){
+    warning("items in replacement but not in input df")
+    warning(as.character(names(replacement.list)[!(names(replacement.list) %in% present.conditions)])
+    )
+  }
+  
+  if (length(present.conditions[!(present.conditions %in% names(replacement.list))]) > 0){
+    warning("items in input df but not in replacement:")
+    warning(as.character(present.conditions[!(present.conditions %in% names(replacement.list))])
+    )  
+  }
+  
+  # Swap out conditions that we have new names for
+  for (i in seq_along(replacement.list)){
+    if (length(input.df[input.df[[condition.col]] == names(replacement.list)[[i]], condition.col]) > 0){
+      
+      input.df[input.df[[condition.col]] == names(replacement.list)[[i]] & !is.na(input.df[[condition.col]]), condition.col] <- replacement.list[[i]]
+    }
+  }
+  
+  input.df <- input.df[!is.na(input.df[[condition.col]]), ]
+  
+  return(input.df)
+}
+
+ia <- update_names(ia) %>% as_tibble()
+ihtk <- update_names(ihtk) %>% as_tibble()
+```
+
+## Outward Current Preparation
+
+### I_A Preparation
+
+```{r}
+# alter names to ensure compatability with below (from thesis version of this analysis)
+ia <- ia %>% rename(a.peak.mV = peak.mV,
+                    a.peak.nA = peak.nA,
+                    a.end.mV = end.mV,
+                    a.end.nA = end.nA,
+                    a.recording = Recording,
+                    Time = `Time Exposed`
+)
+
+# split by data type
+ia.peak <- dplyr::select(ia, -a.end.mV, -a.end.nA)
+ia.end  <- dplyr::select(ia, -a.peak.mV, -a.peak.nA)
+
+# separately group
+ia.peak <- ia.peak %>% 
+  dplyr::filter(a.peak.mV >= mV.lower.bound & a.peak.mV <= mV.upper.bound) %>% 
+  group_by(Condition, Experiment, a.recording, Time, Inj_Cell) %>% 
+  summarise(intercept.peak = lm(a.peak.nA ~ a.peak.mV)$coefficients[1],
+            slope.peak = lm(a.peak.nA ~ a.peak.mV)$coefficients[2]) %>% 
+  ungroup() %>% 
+  group_by(Condition, Experiment, Time, Inj_Cell) %>% # Here we ignore recording as a grouping variable so that we implicitly remove pseudoreplication
+  summarise(intercept.peak = median(intercept.peak, na.rm = T),
+            slope.peak = median(slope.peak, na.rm = T))
+
+ia.end <- ia.end %>% 
+  dplyr::filter(a.end.mV >= mV.lower.bound & a.end.mV <= mV.upper.bound) %>% 
+  group_by(Condition, Experiment, a.recording, Time, Inj_Cell) %>% 
+  summarise(intercept.end = lm(a.end.nA ~ a.end.mV)$coefficients[1],
+            slope.end = lm(a.end.nA ~ a.end.mV)$coefficients[2]) %>% 
+  ungroup() %>% 
+  group_by(Condition, Experiment, Time, Inj_Cell) %>% # Here we ignore recording as a grouping variable so that we implicitly remove pseudoreplication
+  summarise(intercept.end = median(intercept.end, na.rm = T),
+            slope.end = median(slope.end, na.rm = T))
+  
+# stitch back together
+ia <- full_join(ia.peak, ia.end)
+```
+
+### I_{HTK} Preparation
+
+Where `subtracted.rin` is NA, traces had online p/n subtraction. The choice here is how to appropriately deduplicate the data and sumarize it as a linear model.
+```{r}
+ihtk <- ihtk %>% rename(htk.peak.mV = peak.mV,
+                        htk.peak.nA = peak.nA,
+                        htk.end.mV = end.mV,
+                        htk.end.nA = end.nA,
+                        htk.recording = Recording,
+                        Time = `Time Exposed`
+)
+
+
+ihtk <- ihtk %>% mutate(subtracted.rin = as.numeric(subtracted.rin))
+
+# split by data type
+ihtk.peak <- dplyr::select(ihtk, -htk.end.mV, -htk.end.nA, -subtracted.rin)
+ihtk.end  <- dplyr::select(ihtk, -htk.peak.mV, -htk.peak.nA, -subtracted.rin)
+
+# separately group
+ihtk.peak <- ihtk.peak %>% 
+  dplyr::filter(htk.peak.mV >= mV.lower.bound & htk.peak.mV <= mV.upper.bound) %>% 
+  group_by(Condition, Experiment, htk.recording, Time, Inj_Cell) %>% 
+  summarise(intercept.peak = lm(htk.peak.nA ~ htk.peak.mV)$coefficients[1],
+            slope.peak = lm(htk.peak.nA ~ htk.peak.mV)$coefficients[2]) %>% 
+  ungroup() %>% 
+  group_by(Condition, Experiment, Time, Inj_Cell) %>% # Here we ignore recording as a grouping variable so that we implicitly remove pseudoreplication
+  summarise(intercept.peak = median(intercept.peak, na.rm = T),
+            slope.peak = median(slope.peak, na.rm = T))
+
+ihtk.end <- ihtk.end %>% 
+  dplyr::filter(htk.end.mV >= mV.lower.bound & htk.end.mV <= mV.upper.bound) %>% 
+  group_by(Condition, Experiment, htk.recording, Time, Inj_Cell) %>% 
+  summarise(intercept.end = lm(htk.end.nA ~ htk.end.mV)$coefficients[1],
+            slope.end = lm(htk.end.nA ~ htk.end.mV)$coefficients[2]) %>% 
+  ungroup() %>% 
+  group_by(Condition, Experiment, Time, Inj_Cell) %>% # Here we ignore recording as a grouping variable so that we implicitly remove pseudoreplication
+  summarise(intercept.end = median(intercept.end, na.rm = T),
+            slope.end = median(slope.end, na.rm = T))
+
+# stitch back together
+ihtk <- full_join(ihtk.peak, ihtk.end)
+```
+
+```{r}
+ia <- ia %>% 
+  rename(intercept.peak_a = intercept.peak,
+         slope.peak_a = slope.peak, 
+         intercept.end_a = intercept.end, 
+         slope.end_a = slope.end)
+
+ihtk <- ihtk %>% 
+  rename(intercept.peak_htk = intercept.peak,
+         slope.peak_htk = slope.peak, 
+         intercept.end_htk = intercept.end, 
+         slope.end_htk = slope.end)
+
+a <- ia
+htk <- ihtk
+```
+
+
+
+
+# return ----
+
+
+# Write out cleaned data ------------------------------------------------------
+```{r write out data savepoint}
+df.tecc_gj$rmp <- NA
+df.tecc_gj[df.tecc_gj$Inj_Cell == df.tecc_gj$IN4, "rmp"] <- df.tecc_gj[df.tecc_gj$Inj_Cell == df.tecc_gj$IN4, "IN4_baseline"]
+df.tecc_gj[df.tecc_gj$Inj_Cell == df.tecc_gj$IN9, "rmp"] <- df.tecc_gj[df.tecc_gj$Inj_Cell == df.tecc_gj$IN9, "IN9_baseline"]
+
+df.tecc_gj <- df.tecc_gj[, c("Experiment", "Recording",
+                             "Time Exposed", "Condition", "Inj_Cell", "r11", "r12", "r1", "rc", "Coupling Coefficient", "rmp")]
+df.tecc_gj <- df.tecc_gj %>% rename(tecc.recording = `Recording`) %>% rename(Time = `Time Exposed`) %>% rename(cc = `Coupling Coefficient`)
+
+
+df.tevc_gj <- df.tevc_gj[,  c("Experiment", "Recording", 
+                              "Time Exposed", "Condition", "Inj_Cell", "gj","Direction")]
+
+df.tevc_gj <- df.tevc_gj %>% rename(tevc.recording = `Recording`) %>% rename(Time = `Time Exposed`)
+
+# htk <- htk %>% rename(Time = `Time Exposed`) %>% rename(htk.recording = Recording) %>% 
+#   rename(htk.peak.mV = peak.mV) %>% rename(htk.peak.nA = peak.nA) %>% rename(htk.end.mV = end.mV) %>% rename(htk.end.nA = end.nA)
+# 
+# a <- a %>% rename(Time = `Time Exposed`) %>% rename(a.recording = Recording) %>% 
+#   rename(a.peak.mV = peak.mV) %>% rename(a.peak.nA = peak.nA) %>% rename(a.end.mV = end.mV) %>% rename(a.end.nA = end.nA)
+
+
+
+if (write.out.data == TRUE){
+  # files.to.replace <- paste0(getwd(),"/data/", 
+  #                            list.files(paste0(getwd(),"/data/"))
+  #                            )
+  # 
+  # file.remove(files.to.replace)
+  
+  data.list <- list(df.tecc_gj, df.tevc_gj, htk, a)#htk.peak, htk.end, a.peak, a.end)
+  file.names <- c("tecc", "tevc", "htk", "a")#"htk.peak", "htk.end", "a.peak", "a.end")
+  
+  walk(seq_along(data.list), function(i) { 
+    saveRDS(data.list[[i]], file = paste0(getwd(), "/data/", file.names[i], ".rds"))}
+    )
+}
+```
+
+
+#misc code
+```{r eval=FALSE, include=FALSE}
+# data.list <- list(df.tecc_gj, df.tevc_gj, htk.peak, htk.end, a.peak, a.end)
+# file.names <- c("tecc", "tevc", "htk.peak", "htk.end", "a.peak", "a.end")
+# 
+# walk(seq_along(data.list), function(x){
+#   a <- data.list[[x]]
+#   print(file.names[x])
+#   a[a$`Time Exposed` == 60, c("Experiment", "Condition")] %>% unique() %>% group_by(Condition) %>% tally() %>% print()
+# } )
+# 
+# #a[a$`Time Exposed` == 60, c("Experiment", "Condition")] %>% unique() %>% group_by(Condition) %>% tally()
+```
+
+```{r order factors, eval=FALSE, include=FALSE}
+# data.list[[1]]$Condition <- factor(data.list[[1]]$Condition, c("Phase Offset 0 Degrees", "11.2_degrees", "22.5_degrees", "Phase Offset 45 Degrees" , "Phase Offset 90 Degrees" ,"Phase Offset 180 Degrees","Inverted Wave","TEA_ControlWave", "TEA_Silent","Aberrant Depol" ,"hold_at_-53mV"))
+```
+

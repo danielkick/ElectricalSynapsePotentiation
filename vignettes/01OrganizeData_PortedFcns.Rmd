@@ -1,0 +1,270 @@
+---
+title: "convert_xlsx_to_rds"
+author: "Daniel R. Kick"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+```{r}
+
+
+
+
+
+
+
+
+
+
+
+#' Condense Data to Lists
+#'
+#'@title Condense Data to Lists
+#'@aliases
+#'
+#'@param use.path
+#'@param dir.name
+#'@param treatment.name
+#'
+#'@author Daniel Kick (\email{daniel.r.kick@@protonmail.com})
+#'
+#'@export
+condense_data_to_lists <- function(use.path = paste0(getwd(),"/inst/extdata/"),
+                                   dir.name = "aberrantwave",
+                                   treatment.name = "Inverted Wave"){
+
+  temp.list <- list()
+  exp.metadata <- as.data.frame(readxl::read_excel(paste0(use.path, dir.name,"/metadata.xlsx")))
+  #1. add metadata
+  #for each note worthy data file within the directory (tecc_gj.xlsx", "tevc_a.xlsx", "tevc_gj.xlsx", "tevc_htk.xlsx", "tevc_htk_ls.xlsx")
+
+  tecc <- add_metadata(input.df = as.data.frame(readxl::read_excel(paste0(use.path, dir.name,"/tecc_gj.xlsx"))),
+                       metadata.df = exp.metadata)
+  tevc <- add_metadata(input.df = as.data.frame(readxl::read_excel(paste0(use.path, dir.name,"/tevc_gj.xlsx"))),
+                       metadata.df = exp.metadata)
+  a <- add_metadata(input.df = as.data.frame(readxl::read_excel(paste0(use.path, dir.name,"/tevc_a.xlsx"))),
+                    metadata.df = exp.metadata)
+  htk <- add_metadata(input.df = as.data.frame(readxl::read_excel(paste0(use.path, dir.name,"/tevc_htk.xlsx"))),
+                        metadata.df = exp.metadata)
+  htk.ls <- add_metadata(input.df = as.data.frame(readxl::read_excel(paste0(use.path, dir.name,"/tevc_htk_ls.xlsx"))),
+                         metadata.df = exp.metadata)
+
+  #2. add a treatment identifier
+  tecc$Treatment <- treatment.name
+  tevc$Treatment <- treatment.name
+  a$Treatment <- treatment.name
+  htk$Treatment <- treatment.name
+  htk.ls$Treatment <- treatment.name
+  #3. Save as list.
+  temp.list[[1]] <- tecc
+  temp.list[[2]] <- tevc
+  temp.list[[3]] <- a
+  temp.list[[4]] <- htk
+  temp.list[[5]] <- htk.ls
+  return(temp.list)
+}
+
+#' Find Median Deflections
+#'
+#'@title Find Median Deflections
+#'
+#'@param input.df
+#'
+#'@return
+#'
+#'@author Daniel Kick (\email{daniel.r.kick@@protonmail.com})
+#'
+#'@export
+#'
+
+find_median_deflections <- function(input.df = tecc){
+
+  #input.df = tecc[tecc$Treatment == "Aberrant Wave",]
+
+  targets <- c("IN4_mean","IN6_mean","IN7_mean","IN9_mean","IN11_mean","IN12_mean","IN4_baseline","IN6_baseline","IN7_baseline","IN9_baseline","IN11_baseline","IN12_baseline")
+  input.df[, "interact"] <- interaction(input.df[,"Experiment"], input.df[,"Time Exposed"])
+  input.df[, "interact"] <- interaction(input.df[,"interact"], input.df[,"Inj_Cell"])
+  treatments <- unique(input.df$Treatment)
+  for (i in 1:length(treatments)){
+    interactions <- unique(input.df[, "interact"])
+    for (interact in 1:length(interactions)){
+
+      input.df[input.df$interact == interactions[interact], targets] <- lapply(input.df[input.df$interact == interactions[interact], targets], median)
+
+      #      print(
+      #        paste0("Condition ", as.character(current.treatment), "/", as.character(length(treatments)), " ",
+      #              "Interaction ", as.character(interact), "/", as.character(length(interactions)),
+      #              " ", as.character(interactions[interact]), " complete"
+      #        )
+      #      )
+    }
+  }
+
+  #dispose of "interact"
+  input.df <- unique(input.df[, !(names(input.df) %in% c("interact","Trace","Trace Start"))])
+  #reduce down to the medians
+  return(input.df)
+}
+
+#' Solve for Resistances
+#'
+#'@title Solve for Resistances
+#'
+#'@param input.df
+#'
+#'@return
+#'
+#'@author Daniel Kick (\email{daniel.r.kick@@protonmail.com})
+#'
+#'@keywords
+#'
+#'@export
+#'
+
+solve_for_resistances <- function(input.df = tecc){
+  input.df <- na.omit(input.df)
+  input.df[,"r1"] <- 0
+  input.df[,"rc"] <- 0
+  input.df[, "interact"] <- interaction(input.df[,"Experiment"], input.df[,"Recording"])
+  #input.df[, "interact"] <- interaction(input.df[,"interact"], input.df[,"Inj_Cell"])
+  interactions <- unique(input.df$interact)
+  for (interact in seq(length(interactions))){
+    #print(interactions[interact])
+    #  interact = 189
+
+    #for interact = 6 (170623b.0020) there is only one row of r11 instead of two. This is because it is keyed in as lc.na. This causes premature termination. To get around this we only add to the df if there is more than one row for a given interaction
+    if (length(input.df[input.df$interact == interactions[interact], "r11"]) == 2){
+      #here there should be two rows, the medians for both cells at one time point.
+      #We treat them separately so that this is easy to understand
+
+      #for injecting into the cell listed first
+      temp.r11 <- input.df[input.df$interact == interactions[interact], "r11"][1]
+      temp.r22 <- input.df[input.df$interact == interactions[interact], "r11"][2]
+      temp.r12 <- input.df[input.df$interact == interactions[interact], "r12"][1]
+
+      input.df[input.df$interact == interactions[interact], "r1"][1] <-
+        (((temp.r11*temp.r22)-(temp.r12^2)) / (temp.r22-temp.r12))
+
+      input.df[input.df$interact == interactions[interact], "rc"][1] <-
+        (((temp.r11*temp.r22)-(temp.r12^2)) / (temp.r12))
+
+      #for injecting into the cell listed second
+      temp.r11 <- input.df[input.df$interact == interactions[interact], "r11"][2]
+      temp.r22 <- input.df[input.df$interact == interactions[interact], "r11"][1]
+      temp.r12 <- input.df[input.df$interact == interactions[interact], "r12"][2]
+
+      input.df[input.df$interact == interactions[interact], "r1"][2] <-
+        (((temp.r11*temp.r22)-(temp.r12^2)) / (temp.r22-temp.r12))
+
+      input.df[input.df$interact == interactions[interact], "rc"][2] <-
+        (((temp.r11*temp.r22)-(temp.r12^2)) / (temp.r12))
+
+    } else {
+      print(paste("Error: interaction #",
+                  as.character(interact),
+                  ",",
+                  as.character(interactions[interact]),
+                  "contains",
+                  as.character(length(input.df[input.df$interact == interactions[interact], "r11"])),
+                  "row(s)"))
+    }
+  }
+  input.df <- input.df[,!(names(input.df) %in% c("interact"))]
+
+  return(input.df)
+}
+
+
+
+
+#' Process Two Electrode Voltage Clamp
+#'
+#'@title Process Two Electrode Voltage Clamp
+#'@param input.df
+#'
+#'@return
+#'
+#'@author Daniel Kick (\email{daniel.r.kick@@protonmail.com})
+#'
+#'@export
+
+process_tevc <- function(input.df = tevc[tevc$Treatment == "Phase Shift",]){
+  #which channel is at -60mV? Then the other electrode's current aspect is changing.
+  #if the mean is low, then its being held at -60
+  #input.df = tevc
+  #interact = 1
+  plt.list <- list()
+
+  input.df[, "IN4_clamp"] <- (input.df$IN4_baseline + input.df$IN4_mean)
+  input.df[, "IN9_clamp"] <- (input.df$IN9_baseline + input.df$IN9_mean)
+  #input.df[, "IN4_clamp"] <- round((input.df$IN4_clamp)/10)*10
+  #input.df[, "IN9_clamp"] <- round((input.df$IN9_clamp)/10)*10
+
+  #add Inj_Cell
+  input.df[,"Inj_Cell"] <- "LC0"
+  input.df[(abs(input.df$IN7_mean) < abs(input.df$IN12_mean)), "Inj_Cell"] <- input.df[(abs(input.df$IN7_mean) < abs(input.df$IN12_mean)), "IN9"]
+  input.df[(abs(input.df$IN7_mean) > abs(input.df$IN12_mean)), "Inj_Cell"] <- input.df[(abs(input.df$IN7_mean) > abs(input.df$IN12_mean)), "IN4"]
+
+  #input.df[round((input.df$IN4_clamp)/10)*10 == -70, "Inj_Cell"] <- input.df[round((input.df$IN4_clamp)/10)*10 == -70, "IN9"]
+  #input.df[round((input.df$IN9_clamp)/10)*10 == -70, "Inj_Cell"] <- input.df[round((input.df$IN9_clamp)/10)*10 == -70, "IN4"]
+
+
+  ###############################Find slope for each sample###############################
+  #to condense this down, we'll use the same trick as before:
+  #1. add interacton column
+  #2. for each interaction get a slope with lm and save it
+  #3. remove interation column
+  input.df[, "interact"] <- interaction(input.df[,"Experiment"], input.df[,"Time Exposed"])
+  input.df[, "interact"] <- interaction(input.df[,"interact"], input.df[,"Inj_Cell"])
+  interactions <- unique(input.df$interact)
+  input.df[,"slopes"] <- -9999
+  for (interact in seq(length(interactions))) {
+    if (length(unique(input.df[input.df$interact == interactions[interact], "Inj_Cell"])) > 1){
+      warning(paste0("Warning: ", as.character(interactions[interact]), " has more than one Inj_Cell"))
+    } else {
+      if (as.character(unique(input.df[input.df$interact == interactions[interact], "IN4"])) == as.character(unique(input.df[input.df$interact == interactions[interact], "Inj_Cell"]))){
+        print("IN4")
+
+        input.df[input.df$interact == interactions[interact], "slopes"] <-
+          as.numeric(
+            lm(IN12_mean ~ IN7_mean, input.df[input.df$interact == interactions[interact],])$coefficients[2]
+          )
+
+        plt.list[[interact]] <- ggplot(input.df[input.df$interact == interactions[interact],], aes(x = IN7_mean, y = IN12_mean))+geom_vline(xintercept = 0, linetype = 2)+geom_hline(yintercept = 0, linetype = 2)+geom_point()+geom_smooth(method = lm, color = "red")+labs(title = as.character(interactions[interact]))+xlim(min(input.df$IN7_mean), max(input.df$IN7_mean))+ylim(min(input.df$IN12_mean), max(input.df$IN12_mean))
+
+      }else if (as.character(unique(input.df[input.df$interact == interactions[interact], "IN9"])) == as.character(unique(input.df[input.df$interact == interactions[interact], "Inj_Cell"]))) {
+        print("IN9")
+
+        input.df[input.df$interact == interactions[interact], "slopes"] <-
+          as.numeric(
+            lm(IN7_mean ~ IN12_mean, input.df[input.df$interact == interactions[interact],])$coefficients[2]
+          )
+
+        plt.list[[interact]] <- ggplot(input.df[input.df$interact == interactions[interact],], aes(x = IN12_mean, y = IN7_mean))+geom_vline(xintercept = 0, linetype = 2)+geom_hline(yintercept = 0, linetype = 2)+geom_point()+geom_smooth(method = lm, color = "red")+labs(title = as.character(interactions[interact]))+xlim(min(input.df$IN12_mean), max(input.df$IN12_mean))+ylim(min(input.df$IN7_mean), max(input.df$IN7_mean))
+
+      }else{
+        warning(paste0("Warning: ", as.character(interactions[interact]), " does not inject into LC4 or LC5"))
+      }
+    }
+  }
+
+  input.df <- input.df[, !(names(input.df) %in% c("interact","Trace","Trace Start"))]
+  input.df <- input.df[input.df$slopes != -9999,]
+
+  return.list <- list()
+  return.list[[1]] <- input.df
+  return.list[[2]] <- plt.list
+  return(return.list)
+}
+
+
+
+
+```
+
+

@@ -1,0 +1,62 @@
+---
+title: "Figures"
+
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Figure 1: Connectivity and manipulation of the cardiac ganglion
+At baseline the CGs five LCs depolarize synchronously. 
+Paired LCs (4 and 5) are forced to depolarize with a delay by silencing the pacemaking small cells with isotonic sucrose and voltage clamping them to independent voltage commands. 
+Delays of 1/16 to ½ the protocols period were used to drive these neurons.
+High amplitude protocols at in and out of phase were used to explore whether low phase angles could induce a change in gap junction resistance.
+Dynamic clamp was used to explore the consequences of different coupling conductances and delays in activity on LC waveform.
+
+
+## Figure 2: Electrical synapse potentiation requires desynronization and Ca2+ not depolarization
+![](../data/figures/fig2.png)
+
+text here
+
+
+## Figure 3: Desynchronization above 45 degrees depresses the LC 4/5 electrical synapse
+![](../data/figures/fig3.png)
+
+
+Figure 2: Desynchronization above 45 depresses LC 4/5 electrical synapse
+Coupling resistance decreases in most treatment groups. 90 appears to result in synaptic depression which may occur in some preparations at 45 degrees as well.
+
+Figure 4: 22.5 desynchronization sufficient to potentiate LC 4/5 electrical synapse
+Higher amplitude depolarization enables direct testing of a 22.5 effect on the synapse. 22.5 appears sufficient to cause synaptic potentiation, but this effect appears coincident with a technical effect on the synapse.
+
+
+
+
+
+## Figure 4: Desynchronization with a naturalistic stimulus produces inconsistent responses.
+
+![](../data/figures/fig4.png)
+
+Use of a naturalistic stimulus provide more varied responses than under the standardized treatment. Low phase angles appear to result in potentiation whereas some preparations in higher phase angles undergo depression. 
+
+Waveform derived measures fail to explain changes in coupling better than phase.
+
+
+Using metrics calculated from each waveform we tested a suite of linear models to determine if one of these metrics was a better predictor for changes in coupling than phase. We evaluated the efficacy of these models with Akaike information criterion corrected for the number of terms in the model. Because the period of stimuli is variable, we tested phase as a continuous variable. It outperformed all other tested metrics. Despite being penalized for the number of terms, phase treated as a categorical variable ranks 4th.  While phase remains a useful way to approach these data, it is possible that more complex models using several of these predictors, and interactions between them, might better explain the data but disentangling the effect of these attributes is not relevant to the present study.
+
+
+## Figure 5: LC output is impaired by delay in coupling conductance dependent manner
+Correlation between a LC’s output and its control output is impaired by increased conductance in a delay dependent manner. This effect is particularly severe for LCs of unmatched activity (top).
+
+![](D:/Box Sync/dynamicclamp/data/figures/dyABMulti.tif)
+
+
+## _Removed_ Figure 5: Summary of Treatments
+
+Across treatments, modest potentiation occurs in most groups, including a sham desynchronization (waveform inversion). Despite this there appears to be a potentiating effect of 22.5 which at higher phase angles (i.e. 90) appears to reverse.
+
+
+##

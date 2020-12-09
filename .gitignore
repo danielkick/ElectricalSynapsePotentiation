@@ -1,0 +1,26 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+*.abf
+*.atf
+*.ATF
+
+*.xlsx
+*.csv
+
+*.rds
+
+
+# except for these files
+# !example.csv
+
+*.tiff
+*.pdf
+*.eps
+*.svg
+*.png
+
+*.pptx
+*.docx

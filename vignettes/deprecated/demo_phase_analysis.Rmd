@@ -1,0 +1,1756 @@
+---
+title: "Vignette Title"
+author: "Vignette Author"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+
+
+# library(readxl)
+
+
+# library(ggthemes)
+
+library(readABF)
+library(janitor)
+
+library(tidyverse)
+library(cowplot)
+
+# Load up new functions
+for (i in list.files("./R/")){
+  source(paste0("./R/",i))
+}
+
+# devtools::load_all()
+
+metadata <- read.csv("inst/extdata/metadata.csv")
+```
+
+# Working from a prep with extracellulars
+```{r eval=FALSE, include=FALSE}
+trace <- readABF_as_matrix(path = "S:/Data_Daniel/ActiveProjects/181015_electrical_synapses_voltage_modification/190424_0005.abf",
+                            channels = c("IN 4", "IN 9", "IN 14", "IN 15"))
+
+
+
+trace <- as.data.frame(trace)
+trace <- janitor::clean_names(trace, case = "lower_camel")
+
+
+
+
+
+# Wave to event
+## Intracellular
+# DlgList (4,"Mode","Peaks|Troughs|Data rising through level|Data falling through level");
+# DlgReal (5, "Minimum interval [s]", 0,1000);
+# DlgReal (6, "Level [mV]", -3000,3000);
+
+# number_events_above <- function(df = d,
+#                channel = "IN9",
+#                threshold = -35
+#                ){
+#   # threshold = -35#-48#-35
+#   df$event <- F
+#   df[df[[channel]] > threshold, "event"] <- T
+#   
+#   df$event2 <- 0
+#   
+#   event.counter <- 1
+#   for (i in seq_along(df$event)){
+#     if (i == 1){
+#       if (as.logical(df[i, "event"])){
+#         df[i, "event2"] <- event.counter
+#       }
+#     } else {
+#       if((as.logical(df[i-1, "event"]) == F) & as.logical(df[i, "event"])){ #F,T starts new event
+#         event.counter <- event.counter+1
+#         df[i, "event2"] <- event.counter
+#       } else if (as.logical(df[i-1, "event"]) & as.logical(df[i, "event"])){ #T,T extends existing event
+#         df[i, "event2"] <- event.counter
+#       }
+#     }
+#   }
+#   
+#   return(as.array(df$event2))
+# }
+# 
+# # Add above thresholds
+# trace$in14th <- number_events_above(df = trace, 
+#                                     channel = "in14",
+#                                     threshold = 1)
+# 
+# # trace$in15th <- number_events_above(df = trace, 
+# #                                     channel = "in15",
+# #                                     threshold = 1)
+
+
+trace$in14th <- 0
+trace[trace$in14 > 1, "in14th"] <- 1
+
+trace$in15th <- 0
+trace[trace$in15 > 1, "in15th"] <- 1
+
+
+
+tic <- Sys.time()
+trace <- full_join(trace, mk_burst(df = trace,
+                                   time.channel = "time",
+                                   threshold.column = "in14th",
+                                   max.gap = 0.5,
+                                   event.channel.name = "in14.bursts"))
+
+trace <- full_join(trace, mk_burst(df = trace,
+                                   time.channel = "time",
+                                   threshold.column = "in15th",
+                                   max.gap = 0.5,
+                                   event.channel.name = "in15.bursts"))
+
+# test <- mk_burst(df = trace,
+#                                    time.channel = "time",
+#                                    threshold.column = "in15th",
+#                                    max.gap = 0.5,
+#                                    event.channel.name = "in15.bursts")
+
+Sys.time() - tic
+save(trace, file = "./data/demoTrace.Rdata")
+```
+
+
+```{r}
+load("./data/demoTrace.Rdata")
+
+```
+
+
+
+
+```{r eval=FALSE, include=FALSE}
+ggplot()+
+  geom_vline(data = trace[trace$in14.bursts %in% c("Start", "End"),], aes(xintercept = time), color = "steelblue", size = 2)+
+  geom_vline(data = trace[trace$in15.bursts %in% c("Start", "End"),], aes(xintercept = time), color = "firebrick", size = 2)+
+  geom_line(data = trace[seq(from=1,
+                             to = nrow(trace),
+                             by = 10),], aes(x = time, y = in14, color = in14.bursts, group = 1))+
+  geom_line(data = trace[seq(from=1,
+                             to = nrow(trace),
+                             by = 10),], aes(x = time, y = in15-5, color = in15.bursts, group = 1))+
+  xlim(71200, 71225)
+```
+
+
+
+```{r}
+trace$in14.period <- return_period(df = trace,
+                                   time.channel = "time",
+                                   event.channel.name = "in14.bursts")
+
+trace$in15.period <- return_period(df = trace,
+                                   time.channel = "time",
+                                   event.channel.name = "in15.bursts")
+
+
+
+
+```
+
+
+
+
+
+```{r}
+
+
+trace <- cbind(trace,
+               return_delay(df = trace,
+                            time.channel = "time",
+                            event.channel.1 = "in14.bursts",
+                            event.channel.2 = "in15.bursts",
+                            rename.cols = c("d_in14", "in14_d"))
+               )
+
+trace <- cbind(trace,
+               return_delay(df = trace,
+                            time.channel = "time",
+                            event.channel.1 = "in15.bursts",
+                            event.channel.2 = "in14.bursts",
+                            rename.cols = c("d_in15", "in15_d"))
+               )
+
+```
+
+
+
+
+```{r}
+cowplot::plot_grid(plotlist = list(
+
+ggplot()+
+  geom_vline(data = trace[trace$in14.bursts %in% c("Start"),], aes(xintercept = time), color = "steelblue", size = 2)+
+  geom_vline(data = trace[trace$in15.bursts %in% c("Start"),], aes(xintercept = time), color = "firebrick", size = 2)+
+  geom_line(data = trace[seq(from=1,
+                             to = nrow(trace),
+                             by = 10),], aes(x = time, y = in14+10, color = as.factor(d_in15), group = 1))+
+  # geom_line(data = trace[seq(from=1,
+  #                            to = nrow(trace),
+  #                            by = 10),], aes(x = time, y = in14-10, color = in15_d, group = 1))+
+  geom_line(data = trace[seq(from=1,
+                             to = nrow(trace),
+                             by = 10),], aes(x = time, y = in15, group = 1))+
+  theme(legend.position = "")+
+  xlim(71200, 71225),
+
+ggplot()+
+  geom_vline(data = trace[trace$in14.bursts %in% c("Start"),], aes(xintercept = time), color = "steelblue", size = 2)+
+  geom_vline(data = trace[trace$in15.bursts %in% c("Start"),], aes(xintercept = time), color = "firebrick", size = 2)+
+  # geom_line(data = trace[seq(from=1,
+  #                            to = nrow(trace),
+  #                            by = 10),], aes(x = time, y = in14+10, color = d_in15, group = 1))+
+  geom_line(data = trace[seq(from=1,
+                             to = nrow(trace),
+                             by = 10),], aes(x = time, y = in14+10, color = in15_d, group = 1))+
+  
+  geom_line(data = trace[seq(from=1,
+                             to = nrow(trace),
+                             by = 10),], aes(x = time, y = in15, group = 1))+
+  theme(legend.position = "")+
+  xlim(71200, 71225)
+
+), ncol = 1)
+
+# ggplot()+
+#   geom_point(data = trace[seq(from=1,
+#                              to = nrow(trace),
+#                              by = 10),], aes(x = in15_d, y = d_in15), color = "steelblue")+
+#   geom_point(data = trace[seq(from=1,
+#                              to = nrow(trace),
+#                              by = 10),], aes(x = in14_d, y = d_in14), color = "firebrick")
+```
+
+
+```{r}
+
+
+
+
+trace$p_in14.15 <- return_phase(df = trace, delay = "d_in14", period = "in15.period")
+trace$in14.15_p <- return_phase(df = trace, delay = "in14_d", period = "in15.period")
+trace$p_in15.14 <- return_phase(df = trace, delay = "d_in15", period = "in14.period")
+trace$in15.14_p <- return_phase(df = trace, delay = "in15_d", period = "in14.period")
+
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+plts <- purrr::map(c("p_in14.15",
+             "in14.15_p",
+             "p_in15.14",
+             "in15.14_p"), function(i){
+               ggplot()+
+                 # geom_line(data = trace[seq(from=1,
+                 #                            to = nrow(trace),
+                 #                            by = 10),], aes(x = time, y = in15+5, group = 1))+
+                 geom_line(data = trace[seq(from=1,
+                                            to = nrow(trace),
+                                            by = 10),], aes_string(x = "time", y = "in14", color = i, group = 1))+
+                 geom_point(data = trace[trace$in14.bursts %in% c("Start"),], aes(x = time, y = 0), color = "green", size = 2)+
+                 geom_point(data = trace[trace$in15.bursts %in% c("Start"),], aes(x = time, y = 0), color = "firebrick", size = 2)+
+                 theme(legend.position = "")+
+                 labs(x = "", title = i)+
+                 xlim(71200, 71225)
+             })
+
+cowplot::plot_grid(plotlist = plts, ncol = 2, nrow = 2)
+
+
+
+
+
+ggplot()+
+  geom_line(data = trace[seq(from=1,
+                             to = nrow(trace),
+                             by = 10),], aes(x = time, y = in15+5, color = p_in14.15, group = 1))+
+  geom_line(data = trace[seq(from=1,
+                             to = nrow(trace),
+                             by = 10),], aes_string(x = "time", y = "in14", color = "p_in15.14", group = 1))+
+  geom_point(data = trace[trace$in14.bursts %in% c("Start"),], aes(x = time, y = 0), color = "green", size = 2)+
+  geom_point(data = trace[trace$in15.bursts %in% c("Start"),], aes(x = time, y = 5), color = "firebrick", size = 2)+
+  theme(legend.position = "")+
+  xlim(71200, 71225)
+```
+
+
+```{r}
+
+trace <- full_join(trace, 
+                   return_event_cor(df = trace,
+                 time.channel = "time",
+                 ref.channel = "in4",
+                 contrast.channel = "in9",
+                 event.channel = "in14.bursts",
+                 start.feature = "Start",
+                 event.feature = "Event", # All
+                 cor.channel.name = "in4.corr",
+                 correlation.method = "pearson" # c("pearson", "kendall", "spearman")
+))
+
+
+ggplot(trace[seq(from=1,
+                 to = nrow(trace),
+                 by = 10),])+
+  # geom_path(aes(x = time, y = (in14/15)+1))+
+  # geom_path(aes(x = time, y = (in15/15)-1))+
+  lemon::geom_pointline(aes(x = in14.15_p, y = in4.corr), color = "red")+
+  lemon::geom_pointline(aes(x = p_in14.15, y = in4.corr), color = "blue")
+```
+
+
+
+
+```{r}
+rm(list = ls())
+
+# library(plotly)
+# plot_ly(trace[seq(from=1,
+#                   to = 10000,
+#                   by = 100),],
+#         type = "scatter3d", 
+#         x = ~time, y = ~in14, z = ~in4, color = ~in14.bursts,
+#         mode = "lines") %>%
+#   add_markers() %>%
+#   layout(scene = list(xaxis = list(title = 'Time'),
+#                      yaxis = list(title = 'Extracell'),
+#                      zaxis = list(title = 'Intracell')))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Use case
+
+
+
+```{r eval=FALSE, include=FALSE}
+
+use.path <- "S:/Data_Daniel/ActiveProjects/181015_electrical_synapses_voltage_modification/"
+# prepare all the traces to be used in the analysis.
+# Save these into /data/traces
+purrr::walk(
+  seq(1, nrow(metadata)), 
+  function(i){
+  trace <- readABF_as_matrix(path = paste0(use.path, metadata[i, "recording"]),
+                             channels = c("IN 4", "IN 9", "IN 14", "IN 15"))
+  trace <- as.data.frame(trace)
+  trace <- janitor::clean_names(trace, case = "lower_camel")
+  
+  trace$time <- trace$time - min(trace$time)
+  
+  # get the relevant part of the trace
+  trace <- trace[trace$time >= metadata[i, "start"] & 
+                   trace$time < metadata[i, "stop"] ,]
+  
+  # add a little bit of metadata for later
+  trace$recording <- str_split(as.character(metadata[i, "recording"]), ".abf")[[1]][1]
+  trace$us <- metadata[i, "us"]
+  
+  
+  # add a col for the specified thresholds
+  trace$in14th <- 0
+  trace[trace$in14 > metadata[i, "in14.vthresh"], "in14th"] <- 1
+  
+  trace$in15th <- 0
+  trace[trace$in15 > metadata[i, "in15.vthresh"], "in15th"] <- 1
+  
+  
+  
+  tic <- Sys.time()
+  trace <- full_join(trace, mk_burst(df = trace,
+                                     time.channel = "time",
+                                     threshold.column = "in14th",
+                                     max.gap = metadata[i, "in14.max.gap"],
+                                     event.channel.name = "in14.bursts"))
+  
+  trace <- full_join(trace, mk_burst(df = trace,
+                                     time.channel = "time",
+                                     threshold.column = "in15th",
+                                     max.gap = metadata[i, "in15.max.gap"],
+                                     event.channel.name = "in15.bursts"))
+  
+  # test <- mk_burst(df = trace,
+  #                                    time.channel = "time",
+  #                                    threshold.column = "in15th",
+  #                                    max.gap = 0.5,
+  #                                    event.channel.name = "in15.bursts")
+  
+  
+  
+  Sys.time() - tic %>% print()
+  save(trace, file = paste0("./data/traces/",as.character(i),"_", 
+                            str_split(as.character(metadata[i, "recording"]), ".abf")[[1]][1],".Rdata"))
+})
+```
+
+```{r eval=FALSE, include=FALSE}
+traces <- list.files("./data/traces/")
+trace.list <- purrr::map(
+  # 1:3, # FIXME
+  seq_along(traces),
+  function(i){
+  
+    load( paste0("data/traces/", traces[i]))
+  
+  return(trace) # all of these objects were saved as `trace`
+})
+
+
+purrr::walk(seq_along(trace.list), function(i){
+  trace <- trace.list[[i]]
+  # annotate all the traces
+  trace$in14.period <- return_period(df = trace,
+                                     time.channel = "time",
+                                     event.channel.name = "in14.bursts")
+  
+  trace$in15.period <- return_period(df = trace,
+                                     time.channel = "time",
+                                     event.channel.name = "in15.bursts")
+  
+  
+  trace <- cbind(trace,
+                 return_delay(df = trace,
+                              time.channel = "time",
+                              event.channel.1 = "in14.bursts",
+                              event.channel.2 = "in15.bursts",
+                              rename.cols = c("d_in14", "in14_d"))
+  )
+  
+  trace <- cbind(trace,
+                 return_delay(df = trace,
+                              time.channel = "time",
+                              event.channel.1 = "in15.bursts",
+                              event.channel.2 = "in14.bursts",
+                              rename.cols = c("d_in15", "in15_d"))
+  )
+  
+  
+  trace$p_in14.15 <- return_phase(df = trace, delay = "d_in14", period = "in15.period")
+  trace$in14.15_p <- return_phase(df = trace, delay = "in14_d", period = "in15.period")
+  trace$p_in15.14 <- return_phase(df = trace, delay = "d_in15", period = "in14.period")
+  trace$in15.14_p <- return_phase(df = trace, delay = "in15_d", period = "in14.period")
+  
+  
+  trace <- full_join(
+    trace,
+    
+    return_event_cor(
+      df = trace,
+      time.channel = "time",
+      ref.channel = "in4",
+      contrast.channel = "in9",
+      event.channel = "in14.bursts",
+      start.feature = "Start",
+      event.feature = "Event", # All
+      cor.channel.name = "in4.cor",
+      correlation.method = "pearson" # c("pearson", "kendall", "spearman")
+    )
+  )
+  
+  trace <- full_join(
+    trace,
+    
+    return_event_cor(
+      df = trace,
+      time.channel = "time",
+      ref.channel = "in9",
+      contrast.channel = "in4",
+      event.channel = "in15.bursts",
+      start.feature = "Start",
+      event.feature = "Event", # All
+      cor.channel.name = "in9.cor",
+      correlation.method = "pearson" # c("pearson", "kendall", "spearman")
+    )
+  )
+  
+  trace.list[[i]] <<- trace
+})
+
+
+
+for (i in seq_along(trace.list)){
+  if (i == 1){
+    M <- trace.list[[i]]
+  } else {
+    M <- full_join(M, trace.list[[i]])
+  }
+}
+
+
+save(trace, file = paste0("./data/","combined_dataset",".Rdata"))
+```
+
+
+# visualize one case
+Here we'll start with a single trace and build up the visualization
+```{r}
+load(file = paste0("./data/","combined_dataset",".Rdata")) #FIXME neither this, nor the manual load (which used full path) worked
+
+temp <- M[, !(names(M) %in% c("in4","in9","in14","in15","time"))]
+
+temp <- temp[!is.na(temp$in4.cor) |
+               !is.na(temp$in9.cor),]
+# # select the first event row for each event in the df
+# rows.of.interest <- c(base::which(M$in14.bursts == "Start")+1,base::which(M$in15.bursts == "Start")+1)
+# temp <- M[rows.of.interest, ]
+
+# temp <- M[, !(names(M) %in% "time")]
+# temp <- temp[!duplicated(temp), ]
+
+
+temp$in14.15.min.phase <- NA
+temp$in15.14.min.phase <- NA
+# temp[abs(temp$p_in14.15) < abs(temp$in14.15_p), "in14.15.min.phase"] <- temp[abs(temp$p_in14.15) < abs(temp$in14.15_p), "p_in14.15"]
+# temp[abs(temp$p_in14.15) > abs(temp$in14.15_p), "in14.15.min.phase"] <- temp[abs(temp$p_in14.15) > abs(temp$in14.15_p), "in14.15_p"]
+
+#TODO if this works, repeat with in15.14
+
+ggplot()+
+  # geom_point(size = 3)+
+  lemon::geom_pointline(data = temp[round(seq(from = 1, to = nrow(temp), length.out = 100), digits = 0), ], aes(x = in14.15_p, y = in4.cor, group = as.factor(us)))+
+  geom_hline(yintercept = 0)+
+  # lemon::geom_pointline(data = temp[round(seq(from = 1, to = nrow(temp), length.out = 100), digits = 0), ], aes(x = d_in14, y = in4.cor, group = as.factor(us)), color = "steelblue")+
+  facet_grid(.~us)
+
+  scale_color_gradient2()
+
+# library(plotly)
+# 
+# plot_ly(temp, 
+#         type = "scatter3d",
+#         x = ~us,
+#         y = ~in14_d,
+#         z = ~in4.cor,
+#         color = ~in4.cor,
+#         mode = "markers"
+#         )
+
+```
+
+
+
+# Control recording
+```{r}
+metadata <- data.frame(
+recording = c("190424_0002.abf"),
+start = c(0),
+stop = c(300),
+us = c(0),
+in14.vthresh = c(0),
+in15.vthresh = c(0),
+in14.max.gap = c(0.5),
+in15.max.gap = c(0.5),
+in4.extra = c("in15"),
+in9.extra = c("in14")
+)
+
+
+
+
+i=1
+
+use.path <- "S:/Data_Daniel/ActiveProjects/181015_electrical_synapses_voltage_modification/"
+# prepare all the traces to be used in the analysis.
+# Save these into /data/traces
+
+trace <- readABF_as_matrix(path = paste0(use.path, metadata[i, "recording"]),
+                           channels = c("IN 4", "IN 9", "IN 14", "IN 15"))
+trace <- as.data.frame(trace)
+trace <- janitor::clean_names(trace, case = "lower_camel")
+
+trace$time <- trace$time - min(trace$time)
+
+# get the relevant part of the trace
+trace <- trace[trace$time >= metadata[i, "start"] & 
+                 trace$time < metadata[i, "stop"] ,]
+
+# add a little bit of metadata for later
+trace$recording <- str_split(as.character(metadata[i, "recording"]), ".abf")[[1]][1]
+trace$us <- metadata[i, "us"]
+
+## Test out different ways of selecting thresholds: 
+
+### based on dVdT
+
+# Simple is about 3x as slow as lm
+# And going from  a time step of 0.5 -> 0.1 
+# increases time approximately linearly
+# 29.49683 secs -> 2.626982 mins
+
+return_dVdT <- function(df = trace,
+                        channel = "in4",
+                        time.channel = "time",
+                        time.step = 100,
+                        type = "simple") {
+
+  # df = trace
+  # channel = "in4"
+  # time.channel = "time"
+  # time.step = 1
+  # type = "simple"
+
+  df <- as.data.frame(df)
+  df <- df[, c(time.channel, channel)]
+  names(df) <- c("Time", "Voltage")
+  df$dVdT <- NA
+
+  # end.steps <- seq(from = min(df[[time.channel]]), to = max(df[[time.channel]]), by = time.step)
+  steps <- seq(from = min(df[["Time"]]), to = max(df[["Time"]]), by = time.step)
+
+  for (i in seq_along(steps)) {
+    if (i != length(steps)) {
+      start.step <- steps[i]
+      stop.step <- steps[i + 1]
+
+
+      if (type == "lm") {
+        fm <- lm(Voltage ~ Time, data = df[df$Time >= start.step &
+          df$Time < stop.step, ])
+
+        df[df$Time >= start.step & df$Time < stop.step, "dVdT"] <- fm$coefficients[2]
+      } else if (type == "simple") {
+        
+        df[df$Time >= start.step & df$Time < stop.step, "dVdT"] <-
+          (df[base::which(min(abs(df$Time - stop.step)) == abs(df$Time - stop.step)) , "Voltage"] -
+            df[base::which(min(abs(df$Time - start.step)) == abs(df$Time - start.step)) , "Voltage"]) /
+
+            (df[base::which(min(abs(df$Time - stop.step)) == abs(df$Time - stop.step)) , "Time"] -
+            df[base::which(min(abs(df$Time - start.step)) == abs(df$Time - start.step)) , "Time"])
+      } else {
+        warning("type is neither lm nor simple")
+      }
+    }
+  }
+  # Set to user names
+  # names(df) <- c(time.channel, channel, dVdT.channel.name)
+  return(df$dVdT)
+}
+# tic <- Sys.time()
+# trace$in4.dVdT.s <- return_dVdT(df = trace,
+#                               channel = "in4",
+#                               time.channel = "time",
+#                               time.step = 0.5,
+#                               type = "lm")
+# toc <- Sys.time()
+# trace$in4.dVdT.l <- return_dVdT(df = trace,
+#                               channel = "in4",
+#                               time.channel = "time",
+#                               time.step = 0.1,
+#                               type = "lm")
+# print(toc - tic)
+# print(Sys.time()-toc)
+
+# fx.spline <- splinefun(trace$time, trace$in4)
+# trace$in4.ndv <- fx.spline(trace$time, deriv = 1)
+# 
+# ggplot(trace[trace$time<20,])+
+#   geom_line(aes(x = time, y = in4.dVdT.s), color = "firebrick")
+#   geom_line(aes(x = time, y = in4.dVdT.l), color = "steelblue")
+
+ 
+# fit a smooth spline, and return a function describing it
+# fx.spline <- splinefun(x$wavenumber, x$intensity)
+# fx.spline(x$wavenumber, deriv=1)
+
+
+### use a threshold based on the distribution of mV values
+# trace.mean <- mean(trace$in14, na.rm = T)
+# use.mult <- 2
+# sd.thresh <- sd(trace$in14, na.rm = T)*use.mult
+# iqr.thresh <- IQR(trace$in14, na.rm = T)*use.mult
+# 
+# ggplot(trace, aes(x = in14))+
+#   geom_histogram(binwidth = 0.1)+
+#   geom_vline(xintercept = trace.mean)+
+#   geom_vline(xintercept = c(trace.mean - sd.thresh, 
+#                             trace.mean + sd.thresh), color = "red")+
+#   geom_vline(xintercept = c(trace.mean - iqr.thresh, 
+#                             trace.mean + iqr.thresh), color = "blue")+
+#   scale_y_log10()+
+#   ggthemes::theme_foundation()
+# 
+# 
+# cowplot::plot_grid(plotlist = list(
+# ggplot(trace[trace$time < 20, ], aes(x = time, y = in14, group = 1, 
+#                                      color = (trace[trace$time < 20, "in14"] < (trace.mean - sd.thresh))))+
+#   geom_line()+
+#   geom_hline(yintercept = (trace.mean - sd.thresh), color = "red" )+
+#   ggthemes::theme_foundation()+
+#   theme(legend.position = ""),
+# 
+# ggplot(trace[trace$time < 20, ], aes(x = time, y = in14, group = 1, 
+#                                      color = (trace[trace$time < 20, "in14"] < (trace.mean - iqr.thresh))))+
+#   geom_line()+
+#   geom_hline(yintercept = (trace.mean - iqr.thresh), color = "blue" )+
+#   ggthemes::theme_foundation()+
+#   theme(legend.position = "")
+# ))
+
+### rolling average
+# library(zoo)
+# 
+# 
+# trace$roll.mean1e1 <- c(rep(NA, 9), rollmean(trace$in14, k = 10))
+# trace$roll.mean1e2 <- c(rep(NA, 99), rollmean(trace$in14, k = 100))
+# trace$roll.mean1e3 <- c(rep(NA, 999), rollmean(trace$in14, k = 1000))
+# trace$roll.mean1e4 <- c(rep(NA, 9999), rollmean(trace$in14, k = 10000))
+# 
+# 
+# ggplot(trace[trace$time < 20, ], aes_string(x = "time", y = "in14", group = 1))+
+#   # geom_line()+
+#   # geom_line(aes(x = time, y = roll.mean1e1), color = "Blue")+
+#   # geom_line(aes(x = time, y = roll.mean1e2), color = "Green")+
+#   geom_line(aes(x = time, y = roll.mean1e3), color = "Orange")+
+#   geom_line(aes(x = time, y = roll.mean1e4), color = "firebrick")+
+#   ggthemes::theme_foundation()+
+#   theme(legend.position = "")
+# 
+# 
+# ggplot(trace[trace$time < 20, ], aes(x = time, y = in14, group = 1, 
+#                                      color = (trace[trace$time < 20, "in14"] < (mean(trace$roll.mean1e3, na.rm = T) - sd(trace$roll.mean1e3, na.rm = T)*2))))+
+#   geom_line()+
+#   # geom_hline(yintercept = (trace.mean - iqr.thresh), color = "blue" )+
+#   ggthemes::theme_foundation()+
+#   theme(legend.position = "")
+
+
+channel_to_event <- function(df = trace,
+                             channel = "in14",
+                             g_l_abs = "g", #greater, less, abs
+                             sd_or_iqr = "sd",
+                             multiplier = 2 # use a negative value here to select less than some value 
+                             ){
+  
+  # df = trace
+  # channel = "in14"
+  # g_l_abs = "abs" #greater, less, abs
+  # sd_or_iqr = "sd"
+  # multiplier = 2 # use a negative value here to select less than some value
+  # event.col.name = "in14th"
+  
+  df <- as.data.frame(df)
+
+  channel.mean <- mean(df[[channel]], na.rm = T)
+  
+  df$event <- 0
+  if (sd_or_iqr != "sd" &
+      sd_or_iqr !=  "iqr") {
+    warning("sd_or_iqr is not set to a known value")
+  }
+  
+  if (g_l_abs == "g"){
+    if (sd_or_iqr == "sd"){
+      df[df[[channel]] > (channel.mean + (multiplier * sd(df[[channel]], na.rm = T))), "event"] <- 1
+    } else if (sd_or_iqr == "iqr"){
+      df[df[[channel]] > (channel.mean + (multiplier * IQR(df[[channel]], na.rm = T))), "event"] <- 1
+    } 
+    
+  } else if (g_l_abs == "l"){
+    if (sd_or_iqr == "sd"){
+      df[df[[channel]] < (channel.mean + (multiplier * sd(df[[channel]], na.rm = T))), "event"] <- 1
+    } else if (sd_or_iqr == "iqr"){
+      df[df[[channel]] < (channel.mean + (multiplier * IQR(df[[channel]], na.rm = T))), "event"] <- 1
+    } 
+    
+  } else if (g_l_abs == "abs"){
+    if (sd_or_iqr == "sd"){
+     df[df[[channel]] > abs(channel.mean + (multiplier * sd(df[[channel]], na.rm = T))), "event"] <- 1
+    } else if (sd_or_iqr == "iqr"){
+      df[df[[channel]] > abs(channel.mean + (multiplier * IQR(df[[channel]], na.rm = T))), "event"] <- 1
+    } 
+    
+  } else {
+    warning("g_l_abs is not set to a known value")
+    
+  }
+  
+ return(df$event)    
+  
+}
+
+
+## add a col for the specified thresholds ====
+# trace$in14th <- channel_to_event(df = trace,
+#                                  channel = "in14",
+#                                  g_l_abs = "abs", #greater, less, abs
+#                                  sd_or_iqr = "sd",
+#                                  multiplier = 2 # use a negative value here to select less than some value
+# )
+# 
+# trace$in15th <- channel_to_event(df = trace,
+#                                  channel = "in15",
+#                                  g_l_abs = "abs", #greater, less, abs
+#                                  sd_or_iqr = "sd",
+#                                  multiplier = 2 # use a negative value here to select less than some value
+# )
+# 
+# 
+# 
+# # ggplot(trace)+
+# #   geom_vline(xintercept = trace[trace$in14th == 1, "time"], color = "red")+
+# #   geom_line(aes(x = time, y = in14))+
+# #   xlim(0, 20)
+# 
+# ggplot(trace)+
+#   geom_vline(xintercept = trace[trace$in15th == 1, "time"], color = "red")+
+#   geom_line(aes(x = time, y = in4))+
+#   xlim(0, 20)
+# 
+# ggplot(trace)+
+#   geom_vline(xintercept = trace[trace$in14th == 1, "time"], color = "blue")+
+#   geom_line(aes(x = time, y = in9))+
+#   xlim(0, 20)
+
+
+# TODO add an ifstatement to change threshold channels based on metadata file
+
+### By EC ####
+
+trace$in14th <- channel_to_event(df = trace,
+                                 channel = "in14",
+                                 g_l_abs = "g", #greater, less, abs
+                                 sd_or_iqr = "iqr",
+                                 multiplier = 3 # use a negative value here to select less than some value
+)
+
+trace$in15th <- channel_to_event(df = trace,
+                                 channel = "in15",
+                                 g_l_abs = "g", #greater, less, abs
+                                 sd_or_iqr = "iqr",
+                                 multiplier = 3 # use a negative value here to select less than some value
+)
+
+# cowplot::plot_grid(plotlist = list(
+# ggplot(trace)+
+#   geom_vline(xintercept = trace[trace$in14th == 1, "time"], color = "red", alpha = 0.3)+
+#   geom_line(aes(x = time, y = in14))+
+#   xlim(35, 65),
+# 
+# ggplot(trace)+
+#   geom_vline(xintercept = trace[trace$in14th == 1, "time"], color = "red", alpha = 0.3)+
+#   geom_line(aes(x = time, y = in9))+
+#   xlim(35, 65),
+# 
+# ggplot(trace)+
+#   geom_vline(xintercept = trace[trace$in15th == 1, "time"], color = "blue", alpha = 0.3)+
+#   geom_line(aes(x = time, y = in15))+
+#   xlim(35, 65),
+# 
+# ggplot(trace)+
+#   geom_vline(xintercept = trace[trace$in15th == 1, "time"], color = "blue", alpha = 0.3)+
+#   geom_line(aes(x = time, y = in4))+
+#   xlim(35, 65)
+# ), ncol = 1)
+
+# New and improved! 1.47 min -> 1.11 sec!
+mk_burst <- function(df = trace,
+                     time.channel = "time",
+                     threshold.column = "in14th",
+                     max.gap = 0.5,
+                     min.length = 0.1,
+                     return.vector = "both"
+){
+
+  # df = trace
+  # time.channel = "time"
+  # threshold.column = "in14th"
+  # max.gap = 0.5
+  # min.length = 0.1
+  # event.channel.name = "in14.bursts"
+  
+  df <- as.data.frame(df)
+  df$ch.thresh <- df[[threshold.column]]
+
+  # finds start/end times by shifting the logical vector, up 1, down 1 and 0, then adding all three. The start/end time should have a value of 2, inside the event a value of 3
+  df$start.end <-
+    as.numeric(
+      df$ch.thresh[seq(from = 1,to = length(df$ch.thresh),by  = 1)]
+    ) +
+    # Shift all values up by one
+    c(
+      as.numeric(
+        df$ch.thresh[seq(from = 2,to = length(df$ch.thresh),by  = 1)]),
+      0
+    )+
+    # Shift all values down by one.
+    c(0,
+      as.numeric(
+        df$ch.thresh[seq(from = 1,to = (length(df$ch.thresh)-1),by  = 1)]))
+
+  # 101 could make the second value appear as an edge. We remove it thus:
+  df$false.edge <- c(
+      as.numeric(
+        df$ch.thresh[seq(from = 2,to = length(df$ch.thresh),by  = 1)]),
+      0
+    )+
+    c(0,
+      as.numeric(
+        df$ch.thresh[seq(from = 1,to = (length(df$ch.thresh)-1),by  = 1)]))
+  # get rid of the false edges
+  df[(df$start.end == 2) &
+       (df$false.edge == 2), "start.end"] <- 0
+  
+  # add a col that denotes if we have a start.  If is.start == 2, then it's a start.
+  df$is.start <- as.numeric(
+      df$ch.thresh[seq(from = 1,
+                                 to = length(df$ch.thresh),
+                                 by  = 1)]
+    ) +
+    # Shift all values up by one
+    c(
+      as.numeric(
+        df$ch.thresh[seq(from = 2,
+                                   to = length(df$ch.thresh),
+                                   by  = 1)]),
+      0
+    )
+  
+  
+  # shrink to have just the begin/ends so it's hopefully faster to work with.
+  transitions <- df[df$start.end == 2, c(time.channel, "is.start")]
+  # This should never be the case, but we'll include it to help debug some unforseen event.
+  if (!((nrow(transitions) %% 2)==0)){
+    warning("There is an odd number of transitions!")
+    break()
+  }
+  
+  transitions <- data.frame(
+    start =
+      transitions[seq(1, nrow(transitions) - 1, 2), c(time.channel)],
+    end = transitions[seq(2, nrow(transitions), 2), c(time.channel)]
+  )
+  
+
+
+  # find delay between events
+  transitions$shift.start <- c(
+      as.numeric(
+        transitions[["start"]][seq(from = 2,
+                         to = length(transitions[["start"]]),
+                         by  = 1)]),
+      0)
+  
+  transitions$delay <- transitions[, "shift.start"] - transitions[, "start"]
+  
+  # denote which are less than the maximum time gap
+  transitions$under.gap <- 0
+  transitions[transitions$delay < max.gap, "under.gap"] <- 1
+  
+  # the first row is a new burst by definition. After that, new bursts are only the values that are NOT under.gap, i.e. 0.
+  # We can extract the start/end of each burst thus:
+  transitions <- data.frame(
+    start = transitions[c(1, base::which(transitions$under.gap == 0)+1) , "start"],
+    end = transitions[c(base::which(transitions$under.gap == 0), nrow(transitions)) , "end"])
+  
+  # Remove all rows that have a delay below the minimum length
+  transitions <- transitions[(transitions$end - transitions$start) >= min.length, ]
+  
+  
+  df$burst <- 0
+  df$burst.feature <- "baseline"
+  for (i in seq(1, nrow(transitions))){
+    df[df[[time.channel]] >= transitions[i, "start"] &
+         df[[time.channel]] <= transitions[i, "end"], "burst"] <- i
+    
+    #use col `burst` to figure out when the start/end are
+    df[min(base::which(df$burst == i)), "burst.feature"] <- "start"
+    df[max(base::which(df$burst == i)), "burst.feature"] <- "end"
+    
+    # #deprecated version.
+    # df[df[[time.channel]] >= transitions[i, "start"], "burst.feature"] <- "start"
+    # df[df[[time.channel]] <= transitions[i, "end"], "burst.feature"] <- "end"
+    
+  }
+  
+  if (return.vector == "both"){
+    print("returning burst, burst.feature")
+      return(list(df$burst,
+              df$burst.feature))
+  } else if (return.vector == "burst"){
+      return(df$burst)
+  } else if (return.vector == "burst.feature"){
+      return(df$burst.feature)
+  } else {
+    warning("return.vector selction is missing. \nChoose `burst`, `burst.feature`, or `both`. \nDefaulting to burst.")
+    return(df$burst)
+  }
+}
+
+# tic <- Sys.time()
+# #Time difference of 1.474566 mins
+# aa <- mk_burst2(df = trace,
+#           time.channel = "time",
+#           threshold.column = "in14th",
+#           max.gap = 0.5)
+# print(Sys.time()- tic)
+# 
+# tic <- Sys.time()
+# #Time difference of 1.112449 secs
+# bb <- mk_burst(df = trace,
+#          time.channel = "time",
+#          threshold.column = "in14th",
+#          max.gap = 0.5)
+# print(Sys.time()- tic)
+
+temp <- mk_burst(df = trace,
+                 time.channel = "time",
+                 threshold.column = "in14th",
+                 max.gap = 0.5,
+                 return.vector = "both")
+
+trace$in14.bursts <- temp[[1]]
+trace$in14.bursts.limits <- temp[[2]]
+
+temp <- mk_burst(df = trace,
+                 time.channel = "time",
+                 threshold.column = "in15th",
+                 max.gap = 0.5,
+                 return.vector = "both")
+
+trace$in15.bursts <- temp[[1]]
+trace$in15.bursts.limits <- temp[[2]]
+
+
+
+# edited to work with start or Start
+return_period <- function(df = trace,
+         time.channel = "time",
+         event.channel.name = "in14.bursts", #"in14.burst.limits"
+         type = "bursts" #limits
+){
+  
+# df = trace
+# time.channel = "time"
+# event.channel.name = "in14.bursts" #"in14.burst.limits"
+# type = "bursts" #limits
+
+  df <- as.data.frame(df)
+  
+  if (type == "limits"){
+  ## Instead of 0000222222000 we have 0000100001000
+  starts <- df[df[[event.channel.name]] %in% c("start", "Start"), c(time.channel, event.channel.name)]
+  } else if (type == "bursts"){
+  ## Instead of 0000100001000 we have 0000222222000
+    
+    
+    
+  for (i in unique(df[[event.channel.name]])[!(unique(df[[event.channel.name]]) %in% c(0))]){
+    if (i ==1){
+      starts <- as.data.frame(df[min(which(df[[event.channel.name]] == i)), time.channel])
+      names(starts) <- time.channel
+    }else{
+      starts <- rbind(starts, df[min(which(df[[event.channel.name]] == i)), time.channel])
+    }
+  }  
+  } else {
+    warning("type is not set as either bursts or limits!")
+  }
+  
+  starts$starts.shift <- c(starts[[time.channel]][seq(from = 2, to = nrow(starts), by = 1)],0)
+  starts$period <- starts[["starts.shift"]]- starts[[time.channel]]
+  #Since we don't have the start of the next cycle, the last observation's period is set to NA
+  starts[nrow(starts), "period"] <- NA
+  
+  # fill in df's period col
+  df$period <- NA
+  for (i in seq(from = 1, to = nrow(starts)-1, by = 1)){
+    df[(df[[time.channel]] >= starts[[time.channel]][i]) &
+         (df[[time.channel]] < starts[[time.channel]][i+1]), "period"] <- starts[i, "period"]
+  }
+
+  
+  return(df[,c("period")])
+}
+
+
+
+  # ggplot(df[round(seq(1, nrow(trace), length.out  = 1000)), ], 
+  #        aes(x = time, y = in14, group = 1, color = as.factor(burst)))+
+  #   geom_line()
+    
+return_delay <- function(df = trace,
+                         time.channel = "time",
+                         event.channel.1 = "in14.bursts",
+                         event.channel.2 = "in15.bursts",
+                         # rename.cols = c("d_in14", "in14_d"),
+                         type = "bursts",
+                         ...) {
+
+  # df = trace
+  # time.channel = "time"
+  # event.channel.1 = "in14.bursts"
+  # event.channel.2 = "in15.bursts"
+  # # rename.cols = c("d_in14", "in14_d")
+  # # "in14.burst.limits"
+  # type = "bursts" #limits
+
+
+
+  df <- as.data.frame(df)
+  if (type == "limits") {
+    ## Instead of 0000222222000 we have 0000100001000
+    # starts <- df[df[[event.channel.name]] %in% c("start", "Start"), c(time.channel, event.channel.name)]
+    starts.1 <- df[df[[event.channel.1]] %in% c("start", "Start"), c(time.channel, event.channel.1)]
+    starts.1$id <- "one"
+
+    starts.2 <- df[df[[event.channel.2]] %in% c("start", "Start"), c(time.channel, event.channel.2)]
+    starts.2$id <- "two"
+  } else if (type == "bursts") {
+    ## Instead of 0000100001000 we have 0000222222000
+    for (i in unique(df[[event.channel.1]])[!(unique(df[[event.channel.1]]) %in% c(0))]) {
+      if (i == 1) {
+        starts.1 <- as.data.frame(df[min(which(df[[event.channel.1]] == i)), time.channel])
+        names(starts.1) <- time.channel
+      } else {
+        starts.1 <- rbind(starts.1, df[min(which(df[[event.channel.1]] == i)), time.channel])
+      }
+    }
+    starts.1$id <- "one"
+
+    for (i in unique(df[[event.channel.2]])[!(unique(df[[event.channel.2]]) %in% c(0))]) {
+      if (i == 1) {
+        starts.2 <- as.data.frame(df[min(which(df[[event.channel.2]] == i)), time.channel])
+        names(starts.2) <- time.channel
+      } else {
+        starts.2 <- rbind(starts.2, df[min(which(df[[event.channel.2]] == i)), time.channel])
+      }
+    }
+    starts.2$id <- "two"
+  } else {
+    warning("type is not set as either bursts or limits!")
+  }
+
+  starts <- full_join(
+    starts.1[, c(time.channel, "id")],
+    starts.2[, c(time.channel, "id")]
+  )
+  starts <- starts[order(starts$time), ]
+
+
+  # To avoid looping through all (i, i+1) pairs, we're shifting the df up and down so we can slice it up based on which columns match.
+  starts.prev <- rbind(c(0, 0), starts[seq(1, to = nrow(starts) - 1), ]) # shift everything down by one
+  starts.next <- rbind(starts[seq(2, to = nrow(starts)), ], c(0, 0)) # shift everything up by one
+  names(starts.prev) <- c("time.prev", "id.prev")
+  names(starts.next) <- c("time.post", "id.post")
+
+  starts <- cbind(starts, starts.prev, starts.next)
+
+  # col for burst in 1n14 -> in15 and another for in15 -> in14. Then if we want the minimum dist, it's easy to slice by the min absolute value.
+  starts$delay.prev <- NA
+  starts$delay.post <- NA
+
+  starts[starts$id.prev != starts$id, "delay.prev"] <-
+    starts[starts$id.prev != starts$id, "time.prev"] - starts[starts$id.prev != starts$id, time.channel]
+
+  starts[starts$id != starts$id.post, "delay.post"] <-
+    starts[starts$id != starts$id.post, time.channel] - starts[starts$id != starts$id.post, "time.post"]
+
+  # first delay.prev and last delay.post are meaningless
+  starts[1, "delay.prev"] <- NA
+  starts[nrow(starts), "delay.post"] <- NA
+
+
+
+
+  # fill in df's period cols
+  df$delay.prev <- NA
+  df$delay.post <- NA
+
+  for (i in seq(from = 1, to = nrow(starts.2) - 1, by = 1)) {
+    df[(df[[time.channel]] >= starts.2[[time.channel]][i]) &
+      (df[[time.channel]] < starts.2[[time.channel]][i + 1]), "delay.prev"] <-
+      starts[starts[[time.channel]] == starts.2[i, time.channel], "delay.prev"]
+
+    df[(df[[time.channel]] >= starts.2[[time.channel]][i]) &
+      (df[[time.channel]] < starts.2[[time.channel]][i + 1]), "delay.post"] <-
+      starts[starts[[time.channel]] == starts.2[i, time.channel], "delay.post"]
+  }
+
+  df <- df[, c("delay.prev", "delay.post")]
+
+  return(list(df$delay.prev, df$delay.post))
+}
+
+
+
+temp <- return_delay(df = trace,
+                     time.channel = "time",
+                     event.channel.1 = "in14.bursts",
+                     event.channel.2 = "in15.bursts",
+                     # rename.cols = c("d_in14", "in14_d"),
+                     type = "bursts")
+
+trace$in14.before <- temp[[1]]
+trace$in14.after  <- temp[[2]]
+
+temp <- return_delay(df = trace,
+                     time.channel = "time",
+                     event.channel.1 = "in15.bursts",
+                     event.channel.2 = "in14.bursts",
+                     # rename.cols = c("d_in14", "in14_d"),
+                     type = "bursts")
+
+trace$in15.before <- temp[[1]]
+trace$in15.after  <- temp[[2]]
+ 
+# trace$p_in14.15 <- return_phase(df = trace, delay = "d_in14", period = "in15.period")
+# trace$in14.15_p <- return_phase(df = trace, delay = "in14_d", period = "in15.period")
+# trace$p_in15.14 <- return_phase(df = trace, delay = "d_in15", period = "in14.period")
+# trace$in15.14_p <- return_phase(df = trace, delay = "in15_d", period = "in14.period")
+```
+
+## Only from the perspecitve of in4 (in15 ec)
+### Compare bursts 
+```{r Original non abstracted by burst}
+tic <- Sys.time()
+# What is the correlation within a cell?
+
+#ignore the first, last burst and all 0s.
+burst.nums <- unique(trace$in15.bursts)[!(unique(trace$in15.bursts) %in% c(0, 1 
+                                                                           # ,max(unique(trace$in15.bursts))
+                                                                           ))]
+output <- data.frame(i = c(NA),
+                        j = c(NA),
+                        cor = c(NA))
+
+for (i in seq(1, length(burst.nums) - 2)) {
+  for (j in seq(i + 1, length(burst.nums) - 1)) {
+    # i <- 1
+    A.start <- trace[trace$in15.bursts == burst.nums[i] & trace$in15.bursts.limits == "start", "time"]
+    A.end <- trace[trace$in15.bursts == burst.nums[i + 1] & trace$in15.bursts.limits == "start", "time"]
+
+    # j <- 2
+    B.start <- trace[trace$in15.bursts == burst.nums[j] & trace$in15.bursts.limits == "start", "time"]
+    B.end <- trace[trace$in15.bursts == burst.nums[j + 1] & trace$in15.bursts.limits == "start", "time"]
+
+
+    # We have to use the shorter period for both
+    if ((A.end - A.start) < (B.end - B.start)) {
+      B.end <- B.start + (A.end - A.start) # how long out the period for A was from B.start
+      B.end <- trace[(abs(trace$time-B.end)) == min(abs(trace$time-B.end)), "time"]
+      
+    } else if ((A.end - A.start) > (B.end - B.start)){
+      A.end <- A.start + (B.end - B.start) # how long out the period for B was from A.start
+      # find the closest actual time
+      A.end <- trace[(abs(trace$time-A.end)) == min(abs(trace$time-A.end)), "time"]
+    }
+    
+    
+    # Convert to row nums to make this easier:
+    A.start <- base::which(trace$time == A.start)
+    A.end <- base::which(trace$time == A.end)
+    B.start <- base::which(trace$time == B.start)
+    B.end <- base::which(trace$time == B.end)
+    
+    # In case the sampling is such that there are inequal row nums:
+    
+    if ((A.end - A.start) < (B.end - B.start)){
+      print(paste0(
+        "Removing ",
+        as.character((B.end - B.start) - (A.end - A.start)),
+        " row(s)"
+      ))
+          B.end <- B.start+(A.end - A.start)  
+      
+    } else if ((A.end - A.start) > (B.end - B.start)){
+      print(paste0(
+        "Removing ",
+        as.character((A.end - A.start) - (B.end - B.start)),
+        " row(s)"
+      ))
+    A.end <- A.start+(B.end - B.start)  
+    
+    }
+    
+    
+    output <- rbind(output, 
+                    c(i, 
+                    j, 
+                    cor(
+      trace[seq(A.start, A.end), "in4"],
+      trace[seq(B.start, B.end), "in4"],
+      method = "pearson"
+    )))
+    
+    
+  }
+}
+
+print(Sys.time() - tic)
+
+
+ggplot(output, aes(x = cor))+
+  geom_density()
+
+ggplot(output, aes(x = i, y = j, fill = cor))+
+  geom_tile()+
+  scale_fill_gradient2(low="Blue", mid="White", high="Red")
+  #geom_point(size = 4, shape = 15)
+
+ggplot()+
+  geom_point(data = output, aes(x = i, y = cor, color = cor), shape = 1)+
+  geom_point(data = output, aes(x = j, y = cor, color = cor), shape = 1)+
+  scale_color_gradient(low="Blue", high="Red")
+```
+### Compare bursts -- Abstracted version
+For A vs A, A vs A', A vs B'
+```{r}
+cor_bursts <- function(
+  df.1 = trace,
+  df.2 = trace, # This will be the same for A vs A and different for the rest
+  time.channel = "time",
+  event.channel.1 = "in14.bursts",
+  event.channel.2 = "in14.bursts",
+  v.channel.1 = "in4",
+  v.channel.2 = "in4",
+  cor.method = "pearson"
+){
+# df.1 = trace
+# df.2 = trace # This will be the same for A vs A and different for the rest
+# time.channel = "time"
+# event.channel.1 = "in14.bursts"
+# event.channel.2 = "in14.bursts"
+# v.channel.1 = "in4"
+# v.channel.2 = "in4"
+# cor.method = "pearson"
+
+df.1 <- as.data.frame(df.1)
+df.2 <- as.data.frame(df.2)
+
+# What is the correlation between cells?
+# ignore the first, last burst, and all 0s.
+A.burst.nums <- unique(df.1[[event.channel.1]])[!(unique(df.1[[event.channel.1]]) %in% c(
+  0, 1, max(unique(df.1[[event.channel.1]]))
+))]
+B.burst.nums <- unique(df.2[[event.channel.2]])[!(unique(df.2[[event.channel.2]]) %in% c(
+  0, 1, max(unique(df.2[[event.channel.2]]))
+))]
+
+# When there is overlap in the on phase of bursts,
+# if exactly two bursts overlap (e.g. not one very long burst on channel A and two short bursts in channel B)
+# use the minimum and maximum times from both to set the window for correlation
+output <- expand.grid(
+  A = A.burst.nums,
+  B = B.burst.nums
+)
+
+output$cor <- NA
+
+# compare all bursts in A to those in B
+for (A in A.burst.nums) {
+  for (B in B.burst.nums) {
+    A.start <- min(df.1[df.1[[event.channel.1]] == A, time.channel])
+    A.end <- max(df.1[df.1[[event.channel.1]] == A, time.channel])
+
+    B.start <- min(df.2[df.2[[event.channel.2]] == B, time.channel])
+    B.end <- max(df.2[df.2[[event.channel.2]] == B, time.channel])
+
+
+    # We have to use the shorter period for both
+    if ((A.end - A.start) < (B.end - B.start)) {
+      B.end <- B.start + (A.end - A.start) # how long out the period for A was from B.start
+      B.end <- df.2[(abs(df.2[[time.channel]] - B.end)) == min(abs(df.2[[time.channel]] - B.end), na.rm = T), time.channel]
+    } else if ((A.end - A.start) > (B.end - B.start)) {
+      A.end <- A.start + (B.end - B.start) # how long out the period for B was from A.start
+      # find the closest actual time
+      A.end <- df.1[(abs(df.1[[time.channel]] - A.end)) == min(abs(df.1[[time.channel]] - A.end), na.rm = T), time.channel]
+    }
+
+    # Convert to row nums to make this easier:
+    A.start <- base::which(df.1[[time.channel]] == A.start)
+    A.end <- base::which(df.1[[time.channel]] == A.end)
+    B.start <- base::which(df.2[[time.channel]] == B.start)
+    B.end <- base::which(df.2[[time.channel]] == B.end)
+
+    # In case the sampling is such that there are inequal row nums:
+    if ((A.end - A.start) < (B.end - B.start)) {
+      print(paste0(
+        "Removing ",
+        as.character((B.end - B.start) - (A.end - A.start)),
+        " row(s)"
+      ))
+      B.end <- B.start + (A.end - A.start)
+    } else if ((A.end - A.start) > (B.end - B.start)) {
+      print(paste0(
+        "Removing ",
+        as.character((A.end - A.start) - (B.end - B.start)),
+        " row(s)"
+      ))
+      A.end <- A.start + (B.end - B.start)
+    }
+    
+    current.cor <- cor(
+      df.1[seq(A.start, A.end), v.channel.1],
+      df.2[seq(B.start, B.end), v.channel.2],
+      method = cor.method
+    )
+
+    output[output$A == A &
+      output$B == B, "cor"] <- current.cor
+    
+    # print(paste0(as.character(A)," ", as.character(B), " ", as.character(current.cor)))
+  }
+}
+
+return(output)
+}
+
+
+tic <- Sys.time()
+output <- cor_bursts(df.1 = trace,
+                     df.2 = trace, # This will be the same for A vs A and different for the rest
+                     time.channel = "time",
+                     event.channel.1 = "in14.bursts",
+                     event.channel.2 = "in15.bursts",
+                     v.channel.1 = "in9",
+                     v.channel.2 = "in4",
+                     cor.method = "pearson")
+print(Sys.time() - tic)
+
+ggplot(output, aes(x = A, y = B, fill = cor)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "Blue", mid = "White", high = "Red")
+
+# ggplot(output, aes(x = delay, y = cor, color = cor)) +
+#   geom_smooth(se = F, color = "gray") +
+#   geom_point() +
+#   labs(x = "delay = B-A")
+# 
+# ggplot(output, aes(x = cor)) +
+#   geom_density()
+# 
+# ggplot(output, aes(x = A, y = B, fill = cor)) +
+#   geom_tile() +
+#   scale_fill_gradient2(low = "Blue", mid = "White", high = "Red")
+# # geom_point(size = 4, shape = 15)
+# 
+# ggplot() +
+#   geom_point(data = output, aes(x = i, y = cor, color = cor), shape = 1) +
+#   geom_point(data = output, aes(x = j, y = cor, color = cor), shape = 1) +
+#   scale_color_gradient(low = "Blue", high = "Red")
+
+```
+
+
+
+### Compare given times across channels
+
+```{r Original non abstracted version}
+# What is the correlation between cells?
+
+#ignore the first, last burst and all 0s.
+A.burst.nums <- unique(trace$in15.bursts)[!(unique(trace$in15.bursts) %in% c(0, 1 
+                                                                           # ,max(unique(trace$in15.bursts))
+                                                                           ))]
+B.burst.nums <- unique(trace$in14.bursts)[!(unique(trace$in14.bursts) %in% c(0, 1 
+                                                                           # ,max(unique(trace$in15.bursts))
+                                                                           ))]
+# burst.nums <- unique(trace$in15.bursts)[!(unique(trace$in15.bursts) %in% c(0, 1 
+#                                                                            # ,max(unique(trace$in15.bursts))
+#                                                                            ))]
+
+# When there is overlap in the on phase of bursts, 
+# if exactly two bursts overlap (e.g. not one very long burst on channel A and two short bursts in channel B)
+# use the minimum and maximum times from both to set the window for correlation
+output <- expand.grid(a = A.burst.nums, 
+            b = B.burst.nums)
+
+output$start <- NA
+output$stop <- NA
+output$delay <- NA
+output$cor <- NA
+
+for (A.burst in A.burst.nums){
+  B.burst <- unique(trace[trace$in15.bursts == A.burst, "in14.bursts"])
+  # drop between burst number
+  B.burst <- B.burst[B.burst!=0]
+  # only proceed if there is a single B.burst that overlaps with A
+  if (length(B.burst) == 1){
+    start <- min(trace[trace$in15.bursts == A.burst, "time"], trace[trace$in14.bursts == B.burst, "time"], na.rm = T)
+    stop <- max(trace[trace$in15.bursts == A.burst, "time"], trace[trace$in14.bursts == B.burst, "time"], na.rm = T)
+    
+    # confirm there are only one burst present each channel in the new time window
+    temp1 <- unique(trace[trace$time >= start &
+                            trace$time <= stop, "in14.bursts"])
+    temp2 <- unique(trace[trace$time >= start &
+                            trace$time <= stop, "in15.bursts"])
+    temp1 <- temp1[temp1!=0]
+    temp2 <- temp2[temp2!=0]
+    if ((length(temp1) == 1) &
+        (length(temp2) == 1)){
+      # use A as ref, delay = B-A
+      output[output$a == A.burst &
+               output$b == B.burst, "delay"] <- min(trace[trace$in14.bursts == B.burst, "time"], na.rm = T) - min(trace[trace$in15.bursts == A.burst, "time"], na.rm = T)
+      
+      output[output$a == A.burst &
+               output$b == B.burst, "start"] <- start
+      
+      output[output$a == A.burst &
+               output$b == B.burst, "stop"] <- stop 
+    }
+  }
+}
+
+# keep only the rows that have start/end pairs.
+output <- output[!is.na(output$start), ]
+
+
+for (i in seq(1, nrow(output))){
+  output[i, "cor"] <- cor(
+    trace[trace$time >= output[i, "start"] & trace$time <= output[i, "stop"], "in4"],
+    trace[trace$time >= output[i, "start"] & trace$time <= output[i, "stop"], "in9"],
+    method = "pearson"
+  )
+}
+
+
+ggplot(output, aes(x = delay, y = cor, color = cor))+
+  geom_smooth(se = F, color = "gray")+
+    geom_point()+
+  labs(x = "delay = B-A")
+
+
+#
+
+## deprecated version ====
+# A.centers <- data.frame(id = A.burst.nums,
+#                       time = rep(NA, times = length(A.burst.nums)))
+# for (i in 1:nrow(A.centers)){
+#   A.centers[i, "time"] <- median(trace[trace$in15.bursts == A.burst.nums[i], "time"])
+# }
+# 
+# B.centers <- data.frame(id = B.burst.nums,
+#                       time = rep(NA, times = length(B.burst.nums)))
+# for (i in 1:nrow(B.centers)){
+#   B.centers[i, "time"] <- median(trace[trace$in14.bursts == B.burst.nums[i], "time"])
+# }
+# 
+# 
+# # Now we'll use the centers of the bursts to figure out which of the bursts should be pairs
+# # i.e. have a shorter distance in time than any other pairs
+# 
+# # A.dist <- matrix(rep(A.centers$time, times = length(B.centers$time)), ncol = length(B.centers$time))
+# # B.dist <- matrix(rep(B.centers$time, times = length(A.centers$time)), nrow = length(A.centers$time))
+# # 
+# # colnames(A.dist) <- colnames(B.dist) <- B.centers$B
+# # rownames(A.dist) <- rownames(B.dist) <- A.centers$A
+# # 
+# # abs.distances <- abs(A.dist - B.dist)
+# # 
+# # row.min.dist <- abs.distances
+# # for (i in 1:nrow(abs.distances)){
+# #   is.min.vect <- row.min.dist[i,] == min(row.min.dist[i, ])
+# #   row.min.dist[i, !is.min.vect] <- 0
+# #   row.min.dist[i, is.min.vect] <- 1
+# # }
+# # 
+# # col.min.dist <- abs.distances
+# # for (i in 1:ncol(abs.distances)){
+# #   is.min.vect <- col.min.dist[, i] == min(col.min.dist[, i])
+# #   col.min.dist[!is.min.vect, i] <- 0
+# #   col.min.dist[is.min.vect, i] <- 1
+# # }
+# 
+# A.centers$trace <- "A"
+# B.centers$trace <- "B"
+# 
+# temp <- full_join(A.centers, B.centers)
+# 
+# temp[order(temp$time), ]
+# 
+# 
+# 
+# A.closest <- data.frame(A = A.burst.nums,
+#                       time = rep(NA, times = length(A.burst.nums)),
+#                       closest.B = rep(NA, times = length(A.burst.nums)))
+# 
+# for (i in seq_along(A.closest$A)){
+#   # find the burst in B with the least time between the center of Ai
+#   A.closest[i, "closest.B"] <- B.centers[base::which(abs(A.centers[i, "time"] - B.centers[, "time"]) == min(abs(A.centers[i, "time"] - B.centers[, "time"]), na.rm = T)), "time"]
+# }
+# 
+# 
+# B.closest <- data.frame(B = B.burst.nums,
+#                       time = rep(NA, times = length(B.burst.nums)),
+#                       closest.A = rep(NA, times = length(B.burst.nums)))
+# 
+# for (i in seq_along(B.closest$B)){
+#   # find the burst in B with the least time between the center of Ai
+#   B.closest[i, "closest.A"] <- A.centers[base::which(abs(B.centers[i, "time"] - A.centers[, "time"]) == min(abs(B.centers[i, "time"] - A.centers[, "time"]), na.rm = T)), "time"]
+# }
+# 
+
+
+```
+### Compare time windows -- Abstracted version
+For A vs B, A' vs B'
+```{r}
+cor_channels <- function(df.1 = trace,
+                  time.channel = "time",
+                  event.channel.1 = "in14.bursts",
+                  event.channel.2 = "in14.bursts",
+                  v.channel.1 = "in4",
+                  v.channel.2 = "in4",
+                  cor.method = "pearson"){
+
+# df.1 = trace
+# time.channel = "time"
+# event.channel.1 = "in14.bursts"
+# event.channel.2 = "in14.bursts"
+# v.channel.1 = "in4"
+# v.channel.2 = "in4"
+# cor.method = "pearson"
+
+df.1 <- as.data.frame(df.1)
+
+
+# What is the correlation between cells?
+# ignore the first, last burst, and all 0s.
+A.burst.nums <- unique(df.1[[event.channel.1]])[!(unique(df.1[[event.channel.1]]) %in% c(
+  0, 1, max(unique(df.1[[event.channel.1]]))
+))]
+B.burst.nums <- unique(df.1[[event.channel.2]])[!(unique(df.1[[event.channel.2]]) %in% c(
+  0, 1, max(unique(df.1[[event.channel.2]]))
+))]
+
+# When there is overlap in the on phase of bursts, 
+# if exactly two bursts overlap (e.g. not one very long burst on channel A and two short bursts in channel B)
+# use the minimum and maximum times from both to set the window for correlation
+output <- expand.grid(
+  A = A.burst.nums, 
+  B = B.burst.nums)
+
+output$start <- NA
+output$stop <- NA
+output$delay <- NA
+output$cor <- NA
+
+for (A in A.burst.nums){
+  B <- unique(df.1[df.1[[event.channel.1]] == A, event.channel.2])
+  # drop between burst number
+  B <- B[B!=0]
+  
+  # only proceed if there is a single B.burst that overlaps with A
+  if (length(B) == 1){
+    start <- min(df.1[df.1[[event.channel.1]] == A, time.channel], df.1[df.1[[event.channel.2]] == B, time.channel], na.rm = T)
+    stop <- max(df.1[df.1[[event.channel.1]] == A, time.channel], df.1[df.1[[event.channel.2]] == B, time.channel], na.rm = T)    
+    
+    # confirm there are only one burst present each channel in the new time window
+    temp1 <- unique(df.1[df.1[[time.channel]] >= start &
+                            df.1[[time.channel]] <= stop, event.channel.1])
+    temp2 <- unique(df.1[df.1[[time.channel]] >= start &
+                            df.1[[time.channel]] <= stop, event.channel.2])
+    temp1 <- temp1[temp1!=0]
+    temp2 <- temp2[temp2!=0]
+    if ((length(temp1) == 1) &
+        (length(temp2) == 1)){
+      
+      # use A as ref, delay = B-A
+      output[output$A == A &
+               output$B == B, "delay"] <- min(df.1[df.1[[event.channel.2]] == B, time.channel], na.rm = T) - min(df.1[df.1[[event.channel.1]] == A, time.channel], na.rm = T)
+      
+      output[output$A == A &
+               output$B == B, "start"] <- start
+      
+      output[output$A == A &
+               output$B == B, "stop"] <- stop 
+    }
+  }
+}
+
+
+
+
+# if ((length(temp1) == 1) &
+#         (length(temp2) == 1)){
+#       # use A as ref, delay = B-A
+#       output[output$a == A.burst &
+#                output$b == B.burst, "delay"] <- min(trace[trace$in14.bursts == B.burst, "time"], na.rm = T) - min(trace[trace$in15.bursts == A.burst, "time"], na.rm = T)
+#       
+#       output[output$a == A.burst &
+#                output$b == B.burst, "start"] <- start
+#       
+#       output[output$a == A.burst &
+#                output$b == B.burst, "stop"] <- stop 
+#     }
+
+# keep only the rows that have start/end pairs.
+output <- output[!is.na(output$start), ]
+
+
+for (i in seq(1, nrow(output))){
+  output[i, "cor"] <- cor(
+    df.1[df.1[[time.channel]] >= output[i, "start"] & df.1[[time.channel]] <= output[i, "stop"], v.channel.1],
+    df.1[df.1[[time.channel]] >= output[i, "start"] & df.1[[time.channel]] <= output[i, "stop"], v.channel.2],
+    method = cor.method
+  )
+}
+
+
+return(output)
+}
+
+output <- cor_channels(df.1 = trace,
+                       time.channel = "time",
+                       event.channel.1 = "in14.bursts",
+                       event.channel.2 = "in15.bursts",
+                       v.channel.1 = "in9",
+                       v.channel.2 = "in4",
+                       cor.method = "pearson")
+
+ggplot(output, aes(x = delay, y = cor, color = cor))+
+  geom_smooth(se = F, color = "gray")+
+    geom_point()+
+  labs(x = "delay = B-A")
+
+
+ggplot(output, aes(x = A, y = B, fill = cor)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "Blue", mid = "White", high = "Red")
+```
+
+
+

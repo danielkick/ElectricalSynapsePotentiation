@@ -1,0 +1,856 @@
+---
+title: "02.2Refactor"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## General ====
+library("tidyverse") # Plotting and data manipulation
+library(here)
+
+## Statistics ====
+library(drc) # for asymptotic model
+# library("nlme") # for nested anova via lme. See http://www.jason-french.com/tutorials/repeatedmeasures.html
+# library("multcomp")
+# library("car")
+# library("agricolae")
+# library(bayestestR)
+# # library(rstanarm)
+# library(estimate)
+# library(equivalence)
+# 
+# 
+# ## Plotting ====
+# library("cowplot") # clean up ggplots, plotgrid
+# library("ggthemes")
+# library("lemon")
+# library(Hmisc) # for mean_sdl ribbons
+# library("ggthemes")
+# library("ggsci")
+# library(see) # Utrum damnati futuri sint, qui non viderunt et crediderunt
+# library(patchwork)
+# 
+# ## Specialty functions ====
+# source(here("R", "02MoniterGapJunction.R"))
+# 
+# ## Global Params ====
+# # theme_set(kickme())
+# theme_set(theme_minimal())
+# library(broom) # for parameter estimates
+# library("furrr")
+# plan(multiprocess)
+```
+
+# Read in and aggregate data
+```{r read in data, eval=TRUE, include=FALSE}
+# Preprocessing ----
+tecc <- readRDS(file = here("data", "tecc.rds"))
+tevc <- readRDS(file = here("data", "tevc.rds"))
+
+tecc <- collapse_duplicate_gj_obs(tecc)
+tevc <- collapse_duplicate_gj_obs(tevc)
+
+## Join independent data types into a single data frame ====
+all.data <- full_join(tecc, tevc)
+
+all.data <- all.data[, c(
+  "Condition", "Experiment", "Time", "Inj_Cell",
+  "tecc.recording", "tevc.recording",
+  "r11", "r12", "r1", "rc", "cc", "rmp", "gj"
+)]
+
+all.data <- all.data %>% as.data.frame()
+```
+
+```{r}
+## Rename conditions ====
+rename.df <- as.data.frame(list(
+  c("Aberrant Depol", "PS.0.High.Amp"),
+  c("Aberrant_Depol_22.5_deg", "PS.22.High.Amp"),
+
+  c("HA 90 Degree", "PS.90.HA"),
+  c("HA 90 Degree Cd", "PS.90.HA.Cd"),
+
+  c("0_deg", "PS.0"),
+  c("22.5_degrees", "PS.22"),
+  c("rep 45 Degree", "PS.45"),
+  c("rep 90 Degree", "PS.90"),
+
+  c("PS.0.orig", "PS.0.orig"),
+  c("PS.22.orig", "PS.22.orig"),
+  c("PS.45.orig", "PS.45.orig"),
+  c("PS.90.orig", "PS.90.orig"),
+  c("PS.180.orig", "PS.180.orig"),
+
+  c("hold_at_-53mV", "Silent.53mV"),
+  c("TEA_ControlWave", "PS.0.TEA"),
+  c("PS.0.TEA", "PS.0.TEA"),
+  c("TEA_Silent", "Silent.TEA"),
+  c("Inverted Wave", "Inv"),
+
+  c("TEA.Active", "TEA.Active")
+))
+
+rename.df <- as.data.frame(t(rename.df))
+names(rename.df) <- c("old", "new")
+rownames(rename.df) <- NULL # get rid of rownames
+
+all.data$changed <- F
+for (i in seq(1, nrow(rename.df))){
+  all.data[all.data$Condition == as.character(rename.df[i, "old"]), "Condition"] <- as.character(rename.df[i, "new"])
+  all.data[all.data$Condition == as.character(rename.df[i, "old"]), "changed"] <- T
+}
+# print out the unchanged rows
+print(all.data[!all.data$changed & !(all.data$Condition %in% as.vector(rename.df[, "new"])), ])
+#and drop
+all.data <- all.data[, !(names(all.data) %in% c("changed"))]
+
+# reorder factors
+all.data$Condition <- factor(all.data$Condition, as.vector(rename.df[, "new"])[-16] ) #-16 removes the duplicate "PS.0.TEA
+
+#convert gj to inverse to make it easier to work with.
+all.data$gj <- (1/all.data$gj)
+```
+
+```{r}
+# restrict to the final set of conditions:
+all.data <- all.data[all.data$Condition %in% c(
+  "PS.0.High.Amp", "PS.22.High.Amp",
+  "PS.90.HA", "PS.90.HA.Cd", 
+  "PS.0", "PS.22", "PS.45", "PS.90"), ]
+```
+
+```{r}
+# new qc, flag first then remove. 
+# this allows for visualization before removal. 
+dept.vars = c("r11", "r12", "r1", "rc", "cc", "rmp", "gj")
+
+for( dept.var in dept.vars){
+  QC.var = paste0("QC", dept.var)
+  all.data[QC.var] = FALSE  
+
+  ### 1. Resistances can't be zero, drop any which are.  ####
+  if(dept.var %in% c("r11", "r12", "r1", "rc", #"cc", "rmp", 
+                     "gj")){
+    mask <- (!is.na(all.data[dept.var]) & (all.data[dept.var] < 0)) 
+    all.data[mask, QC.var] = TRUE
+  }
+  ### 2. If coupling coef is less than 0 or above 1, drop it. ####
+  if(dept.var %in% c("cc")){
+    mask <- (!is.na(all.data[dept.var]) & (all.data[dept.var] > 1 | all.data[dept.var] < 0))
+    all.data[mask, QC.var] = TRUE
+  }
+}
+
+# # for condition | time | response var
+# conditions <- all.data$Condition %>% unique()
+# times <- all.data$Time %>% unique()
+# response.vars <- c("r11", "r1", "cc", "a.peak.nA", "htk.peak.nA", "rc", "gj")
+# 
+# multiplier <-  2
+# use.method <- "use.sd" #use.iqr
+# 
+# tic <- Sys.time()
+# for (i in seq_along(conditions)) {
+#   for (j in seq_along(times)) {
+#     for (k in seq_along(response.vars)) {
+#       if (use.method == "use.sd") {
+#         current.mean <- all.data[all.data$Condition == conditions[i] &
+#           all.data$Time == times[j], response.vars[k]] %>% mean(na.rm = TRUE)
+#         current.sd <- all.data[all.data$Condition == conditions[i] &
+#           all.data$Time == times[j], response.vars[k]] %>% sd(na.rm = TRUE)
+# 
+#         all.data[all.data$Condition == conditions[i] & all.data$Time == times[j] & ((all.data[[response.vars[k]]] < (current.mean - (multiplier * current.sd))) | (all.data[[response.vars[k]]] > (current.mean + (multiplier * current.sd)))) & !(is.na(all.data[[response.vars[k]]])), response.vars[k]] <- NA
+#       } else if (use.method == "use.iqr") {
+#         current.median <- all.data[all.data$Condition == conditions[i] &
+#           all.data$Time == times[j], response.vars[k]] %>% median(na.rm = TRUE)
+#         current.iqr <- all.data[all.data$Condition == conditions[i] &
+#           all.data$Time == times[j], response.vars[k]] %>% IQR(na.rm = TRUE)
+# 
+#         all.data[all.data$Condition == conditions[i] & all.data$Time == times[j] & ((all.data[[response.vars[k]]] < (current.median - (multiplier * current.iqr))) | (all.data[[response.vars[k]]] > (current.median + (multiplier * current.iqr)))) & !(is.na(all.data[[response.vars[k]]])), response.vars[k]] <- NA
+#       } else {
+#         warning(paste(as.character(use.method), "is not use.sd or use.iqr!"))
+#       }
+#     }
+#   }
+# }
+# print(Sys.time() - tic)
+
+```
+
+
+
+
+
+### Reduce dataset
+```{r}
+# Reduce data to target times ----
+# all.data <- all.data[all.data$Time %in% c(0, 20, 40, 60), ]
+
+```
+
+### Calculate deltas and percent changes
+```{r}
+all.data.d <- convert_data_to(
+  input.df = all.data,
+  convert.to = c("difference"),
+  data.cols = c("r11", "r12", "r1", "rc", "cc", "rmp", "gj"#,
+                   #FIXME as above, so below
+                   # "intercept.peak_htk", "slope.peak_htk", "intercept.end_htk", "slope.end_htk",
+                   # "intercept.peak_a", "slope.peak_a", "intercept.end_a", "slope.end_a"
+                   # "htk.peak.mV", "htk.peak.nA", "htk.end.mV", "htk.end.nA",
+                   # "a.peak.mV", "a.peak.nA", "a.end.mV", "a.end.nA"
+  )
+)
+
+M <- all.data#[all.data$Time %in% c(0, 20, 40, 60) , ]
+M.d <- all.data.d#[all.data.d$Time %in% c(0, 20, 40, 60) , ]
+```
+
+## Test w/o deltas
+```{r}
+# d <- add_stim_delay_phase(d = M)
+# d <- M
+# 
+# d$inter <- paste0(d$Experiment, ".", d$Inj_Cell)
+# # REPEAT Manual QC wonky points ----
+# ## gj ====
+# #TEA sync
+# d[d$inter == "180212.LC4" & d$Time %in% c(40), "gj"] <- NA
+# # ps0
+# d[d$inter == "180507.LC4" & d$Time %in% c(40), "gj"] <- NA
+# 
+# ## rc ====
+# # ps0
+# d[d$inter == "180507.LC4" & d$Time %in% c(40), "rc"] <- NA
+# # PS.22
+# d[d$inter == "181001.LC4" & d$Time %in% c(40, 60), "rc"] <- NA
+
+```
+
+```{r}
+# Use expand grid to get a full combination of tests then filter out the ones we don't want. This will let us use one future_map and maybe get faster
+comparisons <- c(paste("PS.0.High.Amp", "PS.22.High.Amp", sep = "_"),
+                 paste("PS.22.High.Amp", "PS.90.HA", sep = "_"),
+                 paste("PS.90.HA", "PS.90.HA.Cd", sep = "_"),
+                 paste("PS.0", "PS.22", "PS.45", "PS.90", sep = "_"))
+dept.vars <- c("gj",
+               "rc",
+               "r12",
+               "cc",
+               "rmp",
+               "r11",
+               "r1")
+
+# Set up a df with the inputs I want.
+all.tests <- as.data.frame(expand.grid(comparisons, dept.vars))
+names(all.tests) <- c("Groups", "DV")
+
+# all.tests <- all.tests %>%
+#   mutate(Obs.Net = ifelse(DV %in% c("gj", "Rc", "rc", "r12"), T, F)) %>% #NOTE: gj == Rc; gj != rc
+#   mutate(Model = ifelse(Groups == "PS.90.HA", "dept.var ~ Time", "dept.var ~ Time * Condition")) %>% #TODO switch to a more robust   mutate(Random = "~1 | Experiment")
+```
+
+template for one
+```{r}
+# Test ----
+M.clean <- d #%>% rename(Rc = gj)
+```
+
+# figures explicit
+```{r}
+condition.labs <- c("TEA Mimic Sync", "TEA Mimic Async", "Depol. Async", "Depol. Async Cd2+",
+                    "Standardized \n0 Deg.", "Standardized \n22.5 Deg.", "Standardized \n45 Deg.", "Standardized \n90 Deg.",
+                    "Individualized \n0 Deg.", "Individualized \n22.5 Deg.", "Individualized \n45 Deg.", "Individualized \n90 Deg.", "Individualized \n180 Deg.")
+
+names(condition.labs) <- c("PS.0.High.Amp", "PS.22.High.Amp", "PS.90.HA", "PS.90.HA.Cd",
+                           "PS.0", "PS.22", "PS.45", "PS.90",
+                           "PS.0.orig", "PS.22.orig", "PS.45.orig", "PS.90.orig", "PS.180.orig")
+
+M.clean$Condition <- factor(M.clean$Condition, levels = c("PS.0.High.Amp", "PS.22.High.Amp", "PS.90.HA", "PS.90.HA.Cd",
+                                                          "PS.0", "PS.22", "PS.45", "PS.90",
+                                                          "PS.0.orig", "PS.22.orig", "PS.45.orig", "PS.90.orig", "PS.180.orig"))
+
+### Params ####
+text.size = 20
+point.size = 3
+line.size = 3
+mean.point.size = 3
+mean.line.size = 3
+
+### High Amplitude Plots ####
+plt.tea <- M.clean[M.clean$Condition %in% c("PS.0.High.Amp", "PS.22.High.Amp"), ] %>%
+  dplyr::select(Condition, Experiment, Inj_Cell, Time, gj) %>%
+  group_by(Condition, Experiment, Inj_Cell, Time) %>%
+  summarise(gj = mean(gj, na.rm = T)) %>%
+  ungroup() %>%
+  # mutate(Time = as.character(Time)) %>%
+  pivot_wider(names_from = Time, values_from = gj) %>%
+  mutate(`20` = `20` - `0`,
+         `40` = `40` - `0`,
+         `60` = `60` - `0`) %>%
+  mutate(`0` = 0) %>%
+  pivot_longer(cols = c(`0`, `20`, `40`, `60`), names_to = "Time", values_to = "gj") %>%
+  group_by(Condition, Time) %>%
+  mutate(mean_gj = mean(gj, na.rm = T),
+         mean_sd_up = mean_gj+sd(gj, na.rm = T),
+         mean_sd_dn =mean_gj- sd(gj, na.rm = T),) %>%
+  mutate(inter = paste(Experiment, Inj_Cell, sep = ".")) %>%
+  ggplot(aes(x = Time,
+             y = gj,
+             # color = Experiment,
+             # shape = Inj_Cell,
+             group = inter))+
+  geom_ribbon(aes(ymin=mean_sd_dn, ymax=mean_sd_up), fill = "gray", alpha = 0.1)+
+  lemon::geom_pointline(size = point.size, linesize = line.size)+
+  geom_point(aes(x = Time, y = mean_gj), color = "white", size = mean.point.size, alpha = 0.3)+
+  geom_pointline(aes(x = Time, y = mean_gj), color = "firebrick", size = mean.point.size, linesize = mean.line.size,  shape = 1)+
+  labs(y = expression(paste(Delta, "Rc", " in M", Omega)), x = "Time in Minutes")+
+  facet_grid(.~Condition,
+             labeller = labeller(Condition = condition.labs))+
+  geom_hline(yintercept = 0)+
+  theme(
+    # axis.text = element_text(size = rel(2), angle = 0),
+        text = element_text(size=text.size)
+        )
+
+plt.hv <- M.clean[M.clean$Condition %in% c("PS.90.HA", "PS.90.HA.Cd" ), ] %>%
+  dplyr::select(Condition, Experiment, Inj_Cell, Time, gj) %>%
+  group_by(Condition, Experiment, Inj_Cell, Time) %>%
+  summarise(gj = mean(gj, na.rm = T)) %>%
+  ungroup() %>%
+  # mutate(Time = as.character(Time)) %>%
+  pivot_wider(names_from = Time, values_from = gj) %>%
+  mutate(`20` = `20` - `0`,
+         `40` = `40` - `0`,
+         `60` = `60` - `0`) %>%
+  mutate(`0` = 0) %>%
+  pivot_longer(cols = c(`0`, `20`, `40`, `60`), names_to = "Time", values_to = "gj") %>%
+  group_by(Condition, Time) %>%
+  mutate(mean_gj = mean(gj, na.rm = T),
+         mean_sd_up = mean_gj+sd(gj, na.rm = T),
+         mean_sd_dn =mean_gj- sd(gj, na.rm = T),) %>%
+  mutate(inter = paste(Experiment, Inj_Cell, sep = ".")) %>%
+  ggplot(aes(x = Time,
+             y = gj,
+             # color = Experiment,
+             # shape = Inj_Cell,
+             group = inter))+
+  geom_ribbon(aes(ymin=mean_sd_dn, ymax=mean_sd_up), fill = "gray", alpha = 0.1)+
+  lemon::geom_pointline(size = point.size, linesize = line.size)+
+  geom_point(aes(x = Time, y = mean_gj), color = "white", size = mean.point.size, alpha = 0.3)+
+  geom_pointline(aes(x = Time, y = mean_gj), color = "firebrick", size = mean.point.size, linesize = mean.line.size,  shape = 1)+
+  labs(y = expression(paste(Delta, "Rc", " in M", Omega)), x = "Time in Minutes")+
+  facet_grid(.~Condition,
+             labeller = labeller(Condition = condition.labs))+
+  geom_hline(yintercept = 0)+
+  theme(
+    # axis.text = element_text(size = rel(2), angle = 0),
+        text = element_text(size=text.size)
+        )
+
+
+
+
+### Low Voltage plots ####
+plt.lv <- M.clean[M.clean$Condition %in% c("PS.0", "PS.22", "PS.45", "PS.90"), ] %>%
+  dplyr::select(Condition, Experiment, Inj_Cell, Time, gj) %>%
+  group_by(Condition, Experiment, Inj_Cell, Time) %>%
+  summarise(gj = mean(gj, na.rm = T)) %>%
+  ungroup() %>%
+  # mutate(Time = as.character(Time)) %>%
+  pivot_wider(names_from = Time, values_from = gj) %>%
+  mutate(`20` = `20` - `0`,
+         `40` = `40` - `0`,
+         `60` = `60` - `0`) %>%
+  mutate(`0` = 0) %>%
+  pivot_longer(cols = c(`0`, `20`, `40`, `60`), names_to = "Time", values_to = "gj") %>%
+  group_by(Condition, Time) %>%
+  mutate(mean_gj = mean(gj, na.rm = T),
+         mean_sd_up = mean_gj+sd(gj, na.rm = T),
+         mean_sd_dn =mean_gj- sd(gj, na.rm = T),) %>%
+  mutate(inter = paste(Experiment, Inj_Cell, sep = ".")) %>%
+  ggplot(aes(x = Time,
+             y = gj,
+             # color = Experiment,
+             # shape = Inj_Cell,
+             group = inter))+
+  geom_ribbon(aes(ymin=mean_sd_dn, ymax=mean_sd_up), fill = "gray", alpha = 0.1)+
+  lemon::geom_pointline(size = point.size, linesize = line.size)+
+  geom_point(aes(x = Time, y = mean_gj), color = "white", size = mean.point.size, alpha = 0.3)+
+  geom_pointline(aes(x = Time, y = mean_gj), color = "firebrick", size = mean.point.size, linesize = mean.line.size,  shape = 1)+
+  labs(y = expression(paste(Delta, "Rc", " in M", Omega)), x = "Time in Minutes")+
+  facet_grid(.~Condition,
+             labeller = labeller(Condition = condition.labs))+
+  geom_hline(yintercept = 0)+
+  theme(
+    # axis.text = element_text(size = rel(2), angle = 0),
+        text = element_text(size=text.size)
+        )
+```
+
+
+
+# Workspace
+
+```{r}
+all.data %>% skimr::skim()
+```
+
+```{r}
+all.data %>% 
+  group_by(Condition, Time) %>% 
+  tally() %>% 
+  pivot_wider(names_from = Time, values_from = n)
+```
+
+```{r}
+all.data %>% 
+  ggplot(aes(x = Time, y = gj, group = Experiment, color = Inj_Cell))+
+  geom_line()+
+  geom_point()+
+  facet_grid(.~Condition)
+```
+
+
+
+```{r}
+# workflow for one:
+temp <- all.data[all.data$Condition %in% c(
+  # "PS.90.HA.Cd", 
+  # "PS.90.HA"
+  # "PS.0.High.Amp", "PS.22.High.Amp"
+  # "PS.0", 
+  "PS.22"
+  # , "PS.45", "PS.90"
+  ), ] %>%
+  dplyr::select(Condition, Experiment, Inj_Cell, Time, gj) 
+
+temp.t0 <- temp %>% 
+  dplyr::filter(Time == 0) %>% 
+  rename(initial = gj) %>% 
+  dplyr::select(-Time)
+
+temp <- full_join(temp, temp.t0)
+temp$gj = temp$gj - temp$initial
+
+temp$Time <- as.numeric(temp$Time)
+
+ggplot(temp, aes(Time, gj, #color = Condition, 
+                 color = Experiment,
+                 group = interaction(Experiment, Inj_Cell)))+
+  geom_point()+
+  geom_line()+
+  facet_grid(.~Condition)
+
+
+
+
+
+
+fm = drm(gj ~ Time,  
+         data = temp, 
+         fct = AR.2(), 
+         pmodels = list(~1,~1))
+
+res = summary(fm)
+
+res$coefficients[2, "Estimate"] # e
+
+
+sensitivity_df <- temp[, c("Experiment", "Inj_Cell")] %>% distinct()
+sensitivity_df["d_all"] <- res$coefficients[1, "Estimate"] # d
+sensitivity_df["e_all"] <- res$coefficients[2, "Estimate"] # e
+sensitivity_df["d_less"] <- NA
+sensitivity_df["e_less"] <- NA
+
+# TODO need a way to handel non-fitting
+
+
+# d_all is with all the data
+# d_less is less a single point
+i = 1
+for(i in seq(1, nrow(sensitivity_df))){
+  print(i)
+  fm_temp = NA
+  res_temp = NA
+  
+  mask = !((temp$Experiment == sensitivity_df[i, "Experiment"]) & (temp$Inj_Cell == sensitivity_df[i, "Inj_Cell"]))
+  fm_temp = drm(gj ~ Time,  
+           data = temp[mask, ], 
+           fct = AR.2(), 
+           pmodels = list(~1,~1))
+  res_temp = summary(fm_temp)
+    
+  sensitivity_df[i, "d_less"] <- res_temp$coefficients[1, "Estimate"] # d
+  sensitivity_df[i, "e_less"] <- res_temp$coefficients[2, "Estimate"] # e
+}
+
+sensitivity_df
+
+
+
+
+## fcns ====
+
+# output: fm, summary of fm, predictions
+
+fit_one_model <- function(indf = temp[mask, ]){
+  fm_temp = drm(gj ~ Time,  
+               data = indf, 
+               fct = AR.2(), 
+               pmodels = list(~1,~1))
+  
+  res_temp = summary(fm_temp)
+  
+  predictions = data.frame(Time = seq(0, 60) )
+  predictions = cbind(predictions, 
+                      predict(fm_temp, newdata = predictions, se.fit = TRUE)
+                      ) %>%
+    rename(gj = Prediction)
+  
+  return(list(fm_temp, res_temp, predictions))
+}
+
+## use ====
+
+# list of results from each removal:
+out_list <- map(seq(1, nrow(sensitivity_df)), function(i){
+  temp_exp = sensitivity_df[i, "Experiment"]
+  temp_cell = sensitivity_df[i, "Inj_Cell"]
+  mask = !((temp$Experiment == temp_exp) & (temp$Inj_Cell == temp_cell))
+  mod_res = fit_one_model(indf = temp[mask, ])
+  out = mod_res[[3]]
+  
+  out["Experiment"]= temp_exp
+  out["Inj_Cell"]= temp_cell
+  
+  out["d"] <- mod_res[[2]]$coefficients[1, "Estimate"] # d
+  out["e"] <- mod_res[[2]]$coefficients[2, "Estimate"] # e
+  
+  return(out)
+})
+
+out_df <- do.call(rbind, out_list)
+
+
+## vis effects of each
+plt1 = out_df %>% 
+  ggplot(aes(x = Time, y = gj, 
+             group = interaction(Experiment, Inj_Cell),
+             color = Experiment))+
+  geom_hline(yintercept = 0)+
+  geom_line()+
+  theme(legend.position = 'none')
+
+plt1.left = out_df %>% 
+  ggplot(aes(x = 0, y = d, 
+             group = interaction(Experiment, Inj_Cell),
+             color = Experiment))+
+  geom_hline(yintercept = 0)+
+  geom_point()
+  # coord_cartesian(ylim = c(0, -0.6))
+
+plt1.down = out_df %>% 
+  ggplot(aes(x = e, y = 0, 
+             group = interaction(Experiment, Inj_Cell),
+             color = Experiment))+
+  geom_point()
+
+library(patchwork)
+(plt1+plt1.left)/plt1.down
+
+
+```
+
+
+```{r}
+# adapt within a comparison
+
+## stats ====
+fm_full = drm(gj ~ Time, Condition, 
+         data = indf[
+           (mask_0 |
+           mask_22 |
+           mask_45 |
+           mask_90
+           ),], 
+         fct = AR.2(), 
+         pmodels = list(
+           # ~1,
+           ~factor(Condition),
+           # ~1
+           ~factor(Condition)
+           ))
+
+summary(fm_full)
+
+fm0 <- drm(gj ~ Time, Condition, data = indf[
+           (mask_0 |
+           mask_22 |
+           mask_45 |
+           mask_90
+           ), ], 
+          fct = AR.2(),
+    pmodels = list(~1, # d
+                   ~1                  # e
+                   ))
+# is using the treatment effect justified?
+anova(fm_full, fm0)
+
+# ED(fm, c(10, 50, 90))
+compParm(fm_full, "d")
+```
+
+
+
+```{r}
+
+temp <- M.clean[M.clean$Condition %in% c(
+  # "PS.90.HA.Cd", "PS.90.HA"
+  # "PS.0.High.Amp", "PS.22.High.Amp"
+  "PS.0", "PS.22", "PS.45", "PS.90"
+                                         
+                                         ), ] %>%
+  dplyr::select(Condition, Experiment, Inj_Cell, Time, gj) %>%
+  group_by(Condition, Experiment, Inj_Cell, Time) %>%
+  summarise(gj = mean(gj, na.rm = T)) %>%
+  ungroup() %>%
+  # mutate(Time = as.character(Time)) %>%
+  pivot_wider(names_from = Time, values_from = gj) %>%
+  mutate(`20` = `20` - `0`,
+         `40` = `40` - `0`,
+         `60` = `60` - `0`) %>%
+  mutate(`0` = 0) %>% 
+  pivot_longer(cols = c(`0`, `20`, `40`, `60`), names_to = "Time", values_to = "gj")
+
+# temp =temp[temp$Condition == 'PS.90', ]
+temp$Time <- as.numeric(temp$Time)
+
+ggplot(temp, aes(Time, gj, #color = Condition, 
+                 color = Experiment,
+                 group = interaction(Experiment, Inj_Cell)))+
+  geom_point()+
+  geom_line()+
+  # facet_grid(.~Experiment)
+  facet_grid(.~Condition)
+```
+
+
+work through low amp
+for(entry in c(
+  #"180308", 
+  # "180309", 
+  "180309a",
+  "180314",
+  # "180315", # must be included
+  "180705",
+  "181001"
+               )){
+  print(entry)
+  fm <- drm(gj ~ Time, Condition, data = temp[temp$Experiment != entry, ], 
+            fct = AR.2(),
+      pmodels = list(~1, # d
+                     ~1                  # e
+                     ))
+  
+  print(summary(fm))
+  
+}
+
+
+
+
+What's up with 22?
+```{r}
+
+library(drc)
+
+indf = temp[temp$Condition %in% c(
+  "PS.0",
+  "PS.22", 
+  "PS.45", "PS.90"
+  ) , ]
+
+mask_0 <- (indf$Condition == "PS.0")
+
+# keep only ok
+mask_22 <- (
+  indf$Experiment %in% c(
+    "180308",  # works
+    # "180309",  # no info
+    # "180309a", # no info
+    # "180314",  # nans produced  -- added to all working, t value goes to infinity
+    "180315",  # works
+    # "180705",  # nans produced -- added to working seems ... okay?
+    "181001",  # works
+    "none") )
+mask_22 <- mask_22 | (
+  (indf$Experiment %in% c("180314") ) | #& indf$Time != 20
+  (indf$Experiment %in% c("180705"))
+)
+
+mask_22 <- mask_22 & !((indf$Experiment == "180308") & (indf$Inj_Cell == "LC5"))
+mask_22 <- mask_22 & !((indf$Experiment == "181001"
+                        ) & (indf$Inj_Cell == "LC5"
+                        ) & (indf$Time == 60
+                      ))
+
+
+    # error causing entries
+    # (indf$Experiment %in% c("180314") & indf$Time != 20) |
+    # (indf$Experiment %in% c("180705") #& indf$Time != 20
+
+mask_45 <- (indf$Condition == "PS.45")
+mask_90 <- (indf$Condition == "PS.90")
+
+# indf_filter = indf[, ]
+## global-ish ====
+# ok -- 0+90
+# not - 0+90+45
+# not - 0+90+22
+# ok -- 22+90
+# ok -- 45+90
+fm_g = drm(gj ~ Time, Condition, 
+         data = indf[
+           (mask_0 |
+            mask_22 |
+           mask_45# |
+           # mask_90
+           ),
+                     ], 
+         fct = AR.2(), 
+         pmodels = list(~1, ~1))
+
+summary(fm_g)
+
+pred_g = data.frame(Time = seq(0, 60))
+pred_g = cbind(pred_g, predict(fm_g, newdata = pred_g, se.fit = TRUE)) %>% 
+  rename(gj = Prediction)
+## 0 ====
+fm_0 = drm(gj ~ Time, Condition, 
+         data = indf[mask_0, ], 
+         fct = AR.2(), 
+         pmodels = list(~1, ~1))
+summary(fm_0)
+pred_0 = data.frame(Time = seq(0, 60),Condition = c("PS.0"))
+pred_0 = cbind(pred_0, predict(fm_0, newdata = pred_0, se.fit = TRUE)) %>% 
+  rename(gj = Prediction)
+## 22 ====
+fm_22 = drm(gj ~ Time, Condition, 
+         data = indf[mask_22, ], 
+         fct = AR.2(), 
+         pmodels = list(~1, ~1))
+summary(fm_22)
+pred_22 = data.frame(Time = seq(0, 60),Condition = c("PS.22"))
+pred_22 = cbind(pred_22, predict(fm_22, newdata = pred_22, se.fit = TRUE)) %>% 
+  rename(gj = Prediction)
+## 45 ====
+fm_45 = drm(gj ~ Time, Condition, 
+         data = indf[mask_45, ], 
+         fct = AR.2(), 
+         pmodels = list(~1, ~1))
+summary(fm_45)
+pred_45 = data.frame(Time = seq(0, 60),Condition = c("PS.45"))
+pred_45 = cbind(pred_45, predict(fm_45, newdata = pred_45, se.fit = TRUE)) %>% 
+  rename(gj = Prediction)
+## 90 ====
+fm_90 = drm(gj ~ Time, Condition, 
+         data = indf[mask_90, ], 
+         fct = AR.2(), 
+         pmodels = list(~1, ~1))
+summary(fm_90)
+pred_90 = data.frame(Time = seq(0, 60),Condition = c("PS.90"))
+pred_90 = cbind(pred_90, predict(fm_90, newdata = pred_90, se.fit = TRUE)) %>% 
+  rename(gj = Prediction)
+
+## plot ====
+ggplot(data = indf, aes(Time, gj #color = Condition, 
+                 # color = Experiment,
+                 ))+
+  geom_hline(yintercept = 0)+
+  geom_line(color = 'darkgray', aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_point(color = 'red')+
+  geom_point(data = indf[
+           (mask_0 |
+           mask_22 |
+           mask_45 |
+           mask_90),
+                     ], color = 'darkgray')+
+  geom_line(data = pred_g, aes(y = gj), color = 'black', linetype = 'dashed')+
+  geom_line(data = pred_0, aes(y = gj, color=Condition))+
+  geom_line(data = pred_22, aes(y = gj, color=Condition))+
+  geom_line(data = pred_45, aes(y = gj, color=Condition))+
+  geom_line(data = pred_90, aes(y = gj, color=Condition))+
+  facet_grid(.~Condition)
+
+## stats ====
+fm_full = drm(gj ~ Time, Condition, 
+         data = indf[
+           (mask_0 |
+           mask_22 |
+           mask_45 |
+           mask_90
+           ),], 
+         fct = AR.2(), 
+         pmodels = list(
+           # ~1,
+           ~factor(Condition),
+           # ~1
+           ~factor(Condition)
+           ))
+
+summary(fm_full)
+
+fm0 <- drm(gj ~ Time, Condition, data = indf[
+           (mask_0 |
+           mask_22 |
+           mask_45 |
+           mask_90
+           ), ], 
+          fct = AR.2(),
+    pmodels = list(~1, # d
+                   ~1                  # e
+                   ))
+# is using the treatment effect justified?
+anova(fm_full, fm0)
+
+# ED(fm, c(10, 50, 90))
+compParm(fm_full, "d")
+
+# modelFit(fm)
+
+
+
+## plot with FULL MODEL ====
+
+# predict all with full model
+pred_00 = data.frame(expand.grid(Time = seq(0, 60),
+                     Condition = c("PS.0",  "PS.22", "PS.45", "PS.90")))
+pred_00 = cbind(pred_00, predict(fm_full, newdata = pred_00, se.fit = TRUE)) %>% 
+  rename(gj = Prediction)
+
+
+ggplot(data = indf, aes(Time, gj #color = Condition, 
+                 # color = Experiment,
+                 ))+
+  geom_hline(yintercept = 0)+
+  geom_line(color = 'darkgray', aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_point(color = 'red')+
+  geom_point(data = indf[
+           (mask_0 |
+           mask_22 |
+           mask_45 |
+           mask_90),
+                     ], color = 'darkgray')+
+  # geom_line(data = pred_g, aes(y = gj), color = 'black', linetype = 'dashed')+
+  geom_line(data = pred_00, aes(y = gj, color=Condition))+
+  # geom_line(data = pred_22, aes(y = gj, color=Condition))+
+  # geom_line(data = pred_45, aes(y = gj, color=Condition))+
+  # geom_line(data = pred_90, aes(y = gj, color=Condition))+
+  facet_grid(.~Condition)
+
+```
+

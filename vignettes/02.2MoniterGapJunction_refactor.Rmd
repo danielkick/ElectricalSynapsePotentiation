@@ -410,6 +410,572 @@ all.data %>%
   facet_grid(.~Condition)
 ```
 
+```{r}
+#TODO pull out gj as variable
+# settings
+condition_set <- list(
+  c("PS.0.High.Amp",  "PS.22.High.Amp"),
+  c("PS.22.High.Amp", "PS.90.HA"),
+  c("PS.90.HA.Cd",    "PS.90.HA"),
+  c("PS.0", "PS.22", "PS.45", "PS.90"))
+
+# data prep
+
+temp <- all.data %>% dplyr::select(Condition, Experiment, Inj_Cell, Time, gj)
+
+temp.t0 <- temp %>%
+  dplyr::filter(Time == 0) %>%
+  rename(initial = gj) %>%
+  dplyr::select(-Time)
+
+temp <- full_join(temp, temp.t0)
+temp$gj = temp$gj - temp$initial
+
+temp$Time <- as.numeric(temp$Time)
+
+# model testing
+# can we fit each condition?
+
+all_condition_list = list()
+for(ith_condition in unique(temp$Condition)){
+  condition_list = list()
+  
+  print(ith_condition)
+  temp_2 <- temp[temp$Condition %in% ith_condition, ]
+    
+  # does the model fit on all data?
+  fm_all_data = try(
+                    drm(gj ~ Time, 
+                        data = temp_2,
+                        fct = AR.2(),
+                        pmodels = list(~1,~1))
+                    )
+  if(typeof(fm_all_data)=="list"){
+    res_all_data = summary(fm_all_data)
+    res_all_data = res_all_data$coefficients     
+    res_all_data = as.data.frame(res_all_data)
+    names(res_all_data) <- c("Estimate", "Std..Error", "t-value", "p-value" )
+    res_all_data["Experiment"] = "All"
+    res_all_data["Inj_Cell"]   = "All"
+  } else {
+    res_all_data <- data.frame("Estimate"=NA,
+                      "Std..Error"=NA,
+                      "t-value"=NA,
+                      "p-value"=NA ,
+                        "Experiment" = "All",
+                        "Inj_Cell" ="All")
+  }
+
+  # what's the effect of each sub-point?
+  obs_df <- temp_2[, c("Experiment", "Inj_Cell")] %>% distinct()
+  
+  for(jth_obs in seq(1, nrow(obs_df))){
+    jth_exp <- obs_df[jth_obs, "Experiment"]
+    jth_cell<- obs_df[jth_obs, "Inj_Cell"]
+    
+    fm_jackknife = ""
+    fm_jackknife = try(
+                    drm(gj ~ Time, 
+                        data = temp_2[, ],
+                        fct = AR.2(),
+                        pmodels = list(~1,~1))
+                    )
+    if(typeof(fm_jackknife)=="list"){
+      res = summary(fm_jackknife)
+      res = res$coefficients     
+      res = as.data.frame(res)
+      names(res) <- c("Estimate", "Std..Error", "t-value", "p-value" )
+      res["Experiment"] = jth_exp
+      res["Inj_Cell"]   = jth_cell
+      
+    } else {
+      res <- data.frame("Estimate"=NA,
+                        "Std..Error"=NA,
+                        "t-value"=NA,
+                        "p-value"=NA,
+                        "Experiment" = jth_exp,
+                        "Inj_Cell" =jth_cell
+                        )
+    }
+    
+    condition_list[[length(condition_list)+1]] <- res
+    
+    
+  }
+  condition_res <- do.call(rbind, condition_list)
+  condition_res <- rbind(res_all_data, condition_res)
+  condition_res['Condition'] <- ith_condition
+  all_condition_list[[length(all_condition_list)+1]] <- condition_res
+    
+}
+jackknife_results <- do.call(rbind, all_condition_list)
+```
+
+```{r}
+jackknife_results %>% 
+  filter(Estimate < 1000) %>% 
+  ggplot(aes(Condition, Estimate, color = Inj_Cell))+
+  geom_point()
+```
+
+# Test First Comparisons
+## PS.0.High.Amp
+```{r}
+# settings
+condition_set <- list(
+  c("PS.0.High.Amp",  "PS.22.High.Amp"),
+  c("PS.22.High.Amp", "PS.90.HA"),
+  c("PS.90.HA.Cd",    "PS.90.HA"),
+  c("PS.0", "PS.22", "PS.45", "PS.90"))
+
+ith_condition = "PS.0.High.Amp"
+
+temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+### Does the full set fit?
+fm <- drm(gj ~ Time, 
+          data = temp_2,
+          fct = AR.2(),
+          pmodels = list(~1,~1))
+
+fm_line <- data.frame(Time = seq(0, 80))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_2 %>% 
+  ggplot(aes(Time, gj))+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'red')+
+  labs(title = ith_condition)
+```
+
+## PS.22.High.Amp
+```{r}
+ith_condition = "PS.22.High.Amp"
+
+temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+### Does the full set fit?
+fm <- drm(gj ~ Time, 
+          data = temp_2,
+          fct = AR.2(),
+          pmodels = list(~1,~1))
+
+fm_line <- data.frame(Time = seq(0, 80))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_2 %>% 
+  ggplot(aes(Time, gj))+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'red')+
+  labs(title = ith_condition)
+```
+
+## Together?
+
+```{r}
+threshold_change = 1.4  #1.5 # <- what is the largest change in 20 minutes that we're willing to accept as real?
+
+ith_condition = c("PS.0.High.Amp",  "PS.22.High.Amp")
+
+temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+
+head(temp_2)
+
+# Get stepwise change
+temp_2_diff = temp_2 %>% 
+  pivot_wider(names_from =  Time, values_from = gj) %>% 
+  mutate(delta00 = 0,
+         delta20 = `20`-`0`,
+         delta40 = `40`-`20`,
+         delta60 = `60`-`40`,
+         delta80 = `80`-`60`) %>% 
+  pivot_longer(c(delta00, delta20, delta40, delta60, delta80), 
+               names_to = "dTime", values_to = "diffgj") %>% 
+  dplyr::select(Condition, Experiment, Inj_Cell, dTime, diffgj) %>% 
+  mutate(Time = as.numeric(str_remove(dTime, "delta"))) %>% 
+  dplyr::select(-dTime)
+
+temp_2 = full_join(temp_2, temp_2_diff)
+
+# we'll look at this to figure out what 
+temp_2 %>% 
+  ggplot(aes(x = abs(diffgj)))+
+  geom_histogram()
+
+# temp_2 <- temp_2 %>%  # <---------------- try changes here
+  # filter(gj < 1) %>% 
+  # filter(gj > -2.5)
+
+temp_2["absdiffgj"] <- abs(temp_2$diffgj)
+
+
+temp_2["remove"] = FALSE
+temp_2 <- temp_2[!is.na(temp_2$gj), ]
+temp_2[temp_2$absdiffgj > threshold_change, "remove"] = TRUE
+
+# flag everything after the first deviation
+# assume that if an experiment fails, every time point after it is not to be trusted.
+flag_after <- temp_2[temp_2$remove, ]
+
+for(i in seq(1, nrow(flag_after))){
+ mask <- (temp_2$Condition == flag_after[i, "Condition" ]) & (
+        temp_2$Experiment == flag_after[i, "Experiment" ]) & (
+        temp_2$Inj_Cell == flag_after[i, "Inj_Cell" ]) & (
+        temp_2$Time >= flag_after[i, "Time"])
+
+  temp_2[mask, "remove"] <- TRUE 
+}
+
+
+# temp_2 <- temp_2[!temp_2$remove, ]
+```
+
+
+```{r}
+### Does the full set fit?
+fm <- drm(gj ~ Time, Condition,
+          data = temp_2[!temp_2$remove,],
+          fct = AR.2(),
+          pmodels = list(~factor(Condition), #~1,
+                         ~1))
+
+fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_2 %>% 
+  ggplot(aes(Time, gj, color = remove))+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'red')+
+  # labs(title = ith_condition)+
+  facet_grid(.~Condition)
+```
+
+```{r}
+### Does the full set fit?
+fm <- drm(gj ~ Time, Condition,
+          data = temp_2,
+          fct = AR.2(),
+          pmodels = list(~factor(Condition), #~1,
+                         #~1))
+                         ~factor(Condition)))
+
+fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_2 %>% 
+  ggplot(aes(Time, gj))+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'red')+
+  # labs(title = ith_condition)+
+  facet_grid(.~Condition)
+```
+
+# Test Second Comparisons
+## PS.90.HA
+```{r}
+ith_condition = "PS.90.HA"
+
+temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+### Does the full set fit?
+fm <- drm(gj ~ Time, 
+          data = temp_2,
+          fct = AR.2(),
+          pmodels = list(~1,~1))
+
+fm_line <- data.frame(Time = seq(0, 80))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_2 %>% 
+  ggplot(aes(Time, gj))+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'red')+
+  labs(title = ith_condition)
+```
+
+## PS.90.HA.Cd
+```{r}
+ith_condition = "PS.90.HA.Cd"
+
+temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+### Does the full set fit?
+fm <- drm(gj ~ Time, 
+          data = temp_2,
+          fct = AR.2(),
+          pmodels = list(~1,~1))
+
+fm_line <- data.frame(Time = seq(0, 80))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_2 %>% 
+  ggplot(aes(Time, gj))+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'red')+
+  labs(title = ith_condition)
+```
+
+
+## Together?
+```{r}
+ith_condition =   c("PS.90.HA.Cd",    "PS.90.HA")
+
+temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+### Does the full set fit?
+fm <- drm(gj ~ Time, Condition,
+          data = temp_2,
+          fct = AR.2(),
+          pmodels = list(~factor(Condition), #~1,
+                         ~1))
+
+fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_2 %>% 
+  ggplot(aes(Time, gj))+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'red')+
+  # labs(title = ith_condition)+
+  facet_grid(.~Condition)
+```
+
+```{r}
+ith_condition =   c("PS.90.HA.Cd",    "PS.90.HA")
+
+temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+### Does the full set fit?
+fm <- drm(gj ~ Time, Condition,
+          data = temp_2,
+          fct = AR.2(),
+          pmodels = list(~factor(Condition), #~1,
+                         #~1))
+                         ~factor(Condition)))
+
+fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_2 %>% 
+  ggplot(aes(Time, gj))+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'red')+
+  # labs(title = ith_condition)+
+  facet_grid(.~Condition)
+```
+
+
+# Test Naturalistic
+## PS.0
+```{r}
+ith_condition = "PS.0"
+
+temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+### Does the full set fit?
+fm <- drm(gj ~ Time, 
+          data = temp_2,
+          fct = AR.2(),
+          pmodels = list(~1,~1))
+
+fm_line <- data.frame(Time = seq(0, 80))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_2 %>% 
+  ggplot(aes(Time, gj))+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'red')+
+  labs(title = ith_condition)
+```
+
+## PS.22
+```{r}
+ith_condition = "PS.22"
+
+temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+### Does the full set fit?
+fm <- drm(gj ~ Time, 
+          data = temp_2,
+          fct = AR.2(),
+          pmodels = list(~1,~1))
+
+fm_line <- data.frame(Time = seq(0, 80))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_2 %>% 
+  ggplot(aes(Time, gj))+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'red')+
+  labs(title = ith_condition)
+```
+
+##  PS.45
+```{r}
+ith_condition = "PS.45"
+
+temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+### Does the full set fit?
+fm <- drm(gj ~ Time, 
+          data = temp_2,
+          fct = AR.2(),
+          pmodels = list(~1,~1))
+
+fm_line <- data.frame(Time = seq(0, 80))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_2 %>% 
+  ggplot(aes(Time, gj))+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'red')+
+  labs(title = ith_condition)
+```
+
+## PS.90
+```{r}
+ith_condition = "PS.90"
+
+temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+### Does the full set fit?
+fm <- drm(gj ~ Time, 
+          data = temp_2,
+          fct = AR.2(),
+          pmodels = list(~1,~1))
+
+fm_line <- data.frame(Time = seq(0, 80))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_2 %>% 
+  ggplot(aes(Time, gj))+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'red')+
+  labs(title = ith_condition)
+```
+
+## Together?
+```{r}
+ith_condition = c("PS.0", "PS.22", "PS.45", "PS.90")
+
+temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+### Does the full set fit?
+fm <- drm(gj ~ Time, Condition,
+          data = temp_2,
+          fct = AR.2(),
+          pmodels = list(~factor(Condition), #~1,
+                         ~1))
+
+fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_2 %>% 
+  ggplot(aes(Time, gj))+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'red')+
+  # labs(title = ith_condition)+
+  facet_grid(.~Condition)
+```
+
+
+```{r}
+ith_condition = c("PS.0", "PS.22", "PS.45", "PS.90")
+
+temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+### Does the full set fit?
+fm <- drm(gj ~ Time, Condition,
+          data = temp_2,
+          fct = AR.2(),
+          pmodels = list(~factor(Condition), #~1,
+                        #~1))
+                         ~factor(Condition)))
+
+fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_2 %>% 
+  ggplot(aes(Time, gj))+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'red')+
+  # labs(title = ith_condition)+
+  facet_grid(.~Condition)
+```
+
+
+## end
+
+
+```{r}
+# ii <- 1
+# 
+# 
+# fm_full = drm(gj ~ Time, Condition, 
+#               data = ,
+#   fct = AR.2(),
+#          pmodels = list(
+#            # ~1,
+#            ~factor(Condition),
+#            # ~1
+#            ~factor(Condition)
+#            ))
+# 
+# summary(fm_full)
+# 
+# 
+# fm_reduced = drm(gj ~ Time, Condition, 
+#               data = temp[temp$Condition %in% condition_set[[ii]], ],
+#   fct = AR.2(),
+#          pmodels = list(
+#            ~1,
+#            ~1
+#            ))
+# 
+# # is using the treatment effect justified?
+# anova(fm_full, fm_reduced)
+# 
+# # ED(fm, c(10, 50, 90))
+# compParm(fm_full, "d")
+# 
+# 
+# 
+# 
+# predictions = data.frame(expand.grid(Condition = condition_set[[ii]],
+#                                      Time = seq(0, 60)))
+# predictions = cbind(predictions,
+#                     predict(fm_full, newdata = predictions, se.fit = TRUE)
+#                     ) %>%
+#   rename(gj = Prediction)
+
+```
+
+
+
+
+
+
+
+
+
+
+
 
 
 Workflow for the effects of each observation set on each parameter
@@ -470,7 +1036,6 @@ out_list <- map(seq(1, nrow(sensitivity_df)), function(i){
   temp_cell = sensitivity_df[i, "Inj_Cell"]
   mask = !((temp$Experiment == temp_exp) & (temp$Inj_Cell == temp_cell))
 
-  
   mod_res = try(fit_one_model(indf = temp[mask, ]))
   if(typeof(mod_res) == "list"){
     out = mod_res[[3]]
@@ -518,6 +1083,20 @@ plt1.down = out_df %>%
 
 
 ```
+
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
 
 Extension to multiple conditions
 ```{r}
@@ -589,15 +1168,41 @@ out_all_conditions <- map(use.conditions, function(Condition_i){
     temp_cell = sensitivity_df[i, "Inj_Cell"]
     mask = !((temp$Experiment == temp_exp) & (temp$Inj_Cell == temp_cell))
     mod_res = fit_one_model(indf = temp[mask, ])
-    out = mod_res[[3]]
-  
-    out["Experiment"]= temp_exp
-    out["Inj_Cell"]= temp_cell
-  
-    out["d"] <- mod_res[[2]]$coefficients[1, "Estimate"] # d
-    out["e"] <- mod_res[[2]]$coefficients[2, "Estimate"] # e
-  
+    
+    
+    mod_res = try(fit_one_model(indf = temp[mask, ]))
+    if(typeof(mod_res) == "list"){
+      out = mod_res[[3]]
+      out["Experiment"]= temp_exp
+      out["Inj_Cell"]= temp_cell
+    
+      out["d"] <- mod_res[[2]]$coefficients[1, "Estimate"] # d
+      out["e"] <- mod_res[[2]]$coefficients[2, "Estimate"] # e
+      out["fit"] <- FALSE
+      
+    } else if(typeof(mod_res) == "character"){
+      out = data.frame(
+        Time=NA,
+        gj=NA,
+        SE=NA,
+        Experiment= temp_exp, 
+        Inj_Cell= temp_cell,
+        d=NA,
+        e=NA,
+        fit = FALSE)
+    }
     return(out)
+    
+    
+    # out = mod_res[[3]]
+    # 
+    # out["Experiment"]= temp_exp
+    # out["Inj_Cell"]= temp_cell
+    # 
+    # out["d"] <- mod_res[[2]]$coefficients[1, "Estimate"] # d
+    # out["e"] <- mod_res[[2]]$coefficients[2, "Estimate"] # e
+    # 
+    # return(out)
   })
   
   out_df <- do.call(rbind, out_list)

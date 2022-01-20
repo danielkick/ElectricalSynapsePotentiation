@@ -649,7 +649,7 @@ temp_2 %>%
   geom_hline(yintercept = 0)+
   geom_point()+
   geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
-  geom_line(data = fm_line, color = 'red')+
+  geom_line(data = fm_line, color = 'Black', size = 1)+
   # labs(title = ith_condition)+
   facet_grid(.~Condition)
 ```
@@ -657,7 +657,7 @@ temp_2 %>%
 ```{r}
 ### Does the full set fit?
 fm <- drm(gj ~ Time, Condition,
-          data = temp_2,
+          data = temp_2[!temp_2$remove,],
           fct = AR.2(),
           pmodels = list(~factor(Condition), #~1,
                          #~1))
@@ -667,11 +667,11 @@ fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
 fm_line["gj"] <- predict(fm, newdata = fm_line)
 ### Does the fit look reasonable?
 temp_2 %>% 
-  ggplot(aes(Time, gj))+
+  ggplot(aes(Time, gj, color = remove))+
   geom_hline(yintercept = 0)+
   geom_point()+
   geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
-  geom_line(data = fm_line, color = 'red')+
+  geom_line(data = fm_line, color = 'Black', size = 1)+
   # labs(title = ith_condition)+
   facet_grid(.~Condition)
 ```
@@ -726,12 +726,140 @@ temp_2 %>%
 
 ## Together?
 ```{r}
-ith_condition =   c("PS.90.HA.Cd",    "PS.90.HA")
+# ith_condition =   c("PS.90.HA.Cd",    "PS.90.HA")
+# 
+# temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+# ### Does the full set fit?
+# fm <- drm(gj ~ Time, Condition,
+#           data = temp_2,
+#           fct = AR.2(),
+#           pmodels = list(~factor(Condition), #~1,
+#                          ~1))
+# 
+# fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
+# fm_line["gj"] <- predict(fm, newdata = fm_line)
+# ### Does the fit look reasonable?
+# temp_2 %>% 
+#   ggplot(aes(Time, gj))+
+#   geom_hline(yintercept = 0)+
+#   geom_point()+
+#   geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+#   geom_line(data = fm_line, color = 'red')+
+#   # labs(title = ith_condition)+
+#   facet_grid(.~Condition)
+```
+
+```{r}
+# ith_condition =   c("PS.90.HA.Cd",    "PS.90.HA")
+# 
+# temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+# ### Does the full set fit?
+# fm <- drm(gj ~ Time, Condition,
+#           data = temp_2,
+#           fct = AR.2(),
+#           pmodels = list(~factor(Condition), #~1,
+#                          #~1))
+#                          ~factor(Condition)))
+# 
+# fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
+# fm_line["gj"] <- predict(fm, newdata = fm_line)
+# ### Does the fit look reasonable?
+# temp_2 %>% 
+#   ggplot(aes(Time, gj))+
+#   geom_hline(yintercept = 0)+
+#   geom_point()+
+#   geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+#   geom_line(data = fm_line, color = 'red')+
+#   # labs(title = ith_condition)+
+#   facet_grid(.~Condition)
+```
+
+
+
+```{r}
+threshold_change = 21.4  #1.5 # <- what is the largest change in 20 minutes that we're willing to accept as real?
+threshold_change_res = 1.5
+
+ith_condition = c("PS.90.HA.Cd",    "PS.90.HA")
 
 temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+
+head(temp_2)
+
+# Get stepwise change
+temp_2_diff = temp_2 %>% 
+  pivot_wider(names_from =  Time, values_from = gj) %>% 
+  mutate(delta00 = 0,
+         delta20 = `20`-`0`,
+         delta40 = `40`-`20`,
+         delta60 = `60`-`40`#,
+         # delta80 = `80`-`60`
+         ) %>% 
+  pivot_longer(c(delta00, delta20, delta40, delta60
+                 # , delta80
+                 ), 
+               names_to = "dTime", values_to = "diffgj") %>% 
+  dplyr::select(Condition, Experiment, Inj_Cell, dTime, diffgj) %>% 
+  mutate(Time = as.numeric(str_remove(dTime, "delta"))) %>% 
+  dplyr::select(-dTime)
+
+
+
+temp_2 = full_join(temp_2, temp_2_diff)
+
+# Try adding in residual from groupxtime change
+temp_2 <- temp_2 %>%
+  ungroup() %>%
+  group_by(Condition, Time) %>%
+  mutate(median_gj = median(gj)) %>%
+  mutate(residual_gj = median_gj - gj) %>%
+  ungroup()
+
+
+# we'll look at this to figure out what 
+temp_2 %>% 
+  ggplot(aes(x = abs(diffgj)))+
+  geom_histogram()
+
+temp_2 %>% 
+  ggplot(aes(x = abs(residual_diffgj)))+
+  geom_histogram()
+
+
+temp_2["absdiffgj"] <- abs(temp_2$diffgj)
+temp_2["absresidgj"] <- abs(temp_2$residual_gj)
+
+
+temp_2["remove"] = FALSE
+temp_2 <- temp_2[!is.na(temp_2$gj), ]
+temp_2[temp_2$absdiffgj > threshold_change, "remove"] = TRUE
+# and add in residual
+temp_2[temp_2$absresidgj > threshold_change_res, "remove"] = TRUE
+
+
+temp_2$Condition <- as.character(temp_2$Condition)
+# flag everything after the first deviation
+# assume that if an experiment fails, every time point after it is not to be trusted.
+flag_after <- temp_2[temp_2$remove, ]
+
+for(i in seq(1, nrow(flag_after))){
+ mask <- (temp_2$Condition == unlist(flag_after[i, "Condition" ])
+     ) & (temp_2$Experiment == unlist(flag_after[i, "Experiment" ])
+     ) & (temp_2$Inj_Cell == unlist(flag_after[i, "Inj_Cell" ])
+     ) & (temp_2$Time >= unlist(flag_after[i, "Time"]))
+
+  temp_2[mask, "remove"] <- TRUE 
+}
+
+
+# temp_2 <- temp_2[!temp_2$remove, ]
+```
+
+
+```{r}
 ### Does the full set fit?
 fm <- drm(gj ~ Time, Condition,
-          data = temp_2,
+          data = temp_2[!temp_2$remove,],
           fct = AR.2(),
           pmodels = list(~factor(Condition), #~1,
                          ~1))
@@ -740,22 +868,21 @@ fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
 fm_line["gj"] <- predict(fm, newdata = fm_line)
 ### Does the fit look reasonable?
 temp_2 %>% 
-  ggplot(aes(Time, gj))+
+  ggplot(aes(Time, gj, color = remove))+
+  geom_line(aes(y = median_gj+threshold_change_res), color = "red", size = 1)+
+  geom_line(aes(y = median_gj), color = "red", size = 1)+
   geom_hline(yintercept = 0)+
   geom_point()+
   geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
-  geom_line(data = fm_line, color = 'red')+
+  geom_line(data = fm_line, color = 'Black', size = 1)+
   # labs(title = ith_condition)+
   facet_grid(.~Condition)
 ```
 
 ```{r}
-ith_condition =   c("PS.90.HA.Cd",    "PS.90.HA")
-
-temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
 ### Does the full set fit?
 fm <- drm(gj ~ Time, Condition,
-          data = temp_2,
+          data = temp_2[!temp_2$remove,],
           fct = AR.2(),
           pmodels = list(~factor(Condition), #~1,
                          #~1))
@@ -765,17 +892,23 @@ fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
 fm_line["gj"] <- predict(fm, newdata = fm_line)
 ### Does the fit look reasonable?
 temp_2 %>% 
-  ggplot(aes(Time, gj))+
+  ggplot(aes(Time, gj, color = remove))+
   geom_hline(yintercept = 0)+
   geom_point()+
   geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
-  geom_line(data = fm_line, color = 'red')+
+  geom_line(data = fm_line, color = 'Black', size = 1)+
   # labs(title = ith_condition)+
   facet_grid(.~Condition)
 ```
 
 
+
+
+
 # Test Naturalistic
+individually all fit on raw
+together post filter only works with constrained time constant
+
 ## PS.0
 ```{r}
 ith_condition = "PS.0"
@@ -917,6 +1050,327 @@ temp_2 %>%
   geom_line(data = fm_line, color = 'red')+
   # labs(title = ith_condition)+
   facet_grid(.~Condition)
+```
+
+
+
+
+
+
+```{r}
+threshold_change = 21.4  #1.5 # <- what is the largest change in 20 minutes that we're willing to accept as real?
+threshold_change_res = 1.5
+
+ith_condition = c("PS.0", "PS.22", "PS.45", "PS.90")
+
+temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+
+head(temp_2)
+
+# Get stepwise change
+temp_2_diff = temp_2 %>% 
+  pivot_wider(names_from =  Time, values_from = gj) %>% 
+  mutate(delta00 = 0,
+         delta20 = `20`-`0`,
+         delta40 = `40`-`20`,
+         delta60 = `60`-`40`,
+         delta80 = `80`-`60`
+         ) %>% 
+  pivot_longer(c(delta00, delta20, delta40, delta60
+                 , delta80
+                 ), 
+               names_to = "dTime", values_to = "diffgj") %>% 
+  dplyr::select(Condition, Experiment, Inj_Cell, dTime, diffgj) %>% 
+  mutate(Time = as.numeric(str_remove(dTime, "delta"))) %>% 
+  dplyr::select(-dTime)
+
+
+
+temp_2 = full_join(temp_2, temp_2_diff)
+
+# Try adding in residual from groupxtime change
+temp_2 <- temp_2 %>%
+  ungroup() %>%
+  group_by(Condition, Time) %>%
+  mutate(median_gj = median(gj, na.rm = T)) %>%
+  mutate(residual_gj = median_gj - gj) %>%
+  ungroup()
+
+
+
+temp_2["absdiffgj"] <- abs(temp_2$diffgj)
+temp_2["absresidgj"] <- abs(temp_2$residual_gj)
+
+
+temp_2["remove"] = FALSE
+temp_2 <- temp_2[!is.na(temp_2$gj), ]
+temp_2[temp_2$absdiffgj > threshold_change, "remove"] = TRUE
+# and add in residual
+temp_2[temp_2$absresidgj > threshold_change_res, "remove"] = TRUE
+
+
+temp_2$Condition <- as.character(temp_2$Condition)
+# flag everything after the first deviation
+# assume that if an experiment fails, every time point after it is not to be trusted.
+flag_after <- temp_2[temp_2$remove, ]
+
+for(i in seq(1, nrow(flag_after))){
+ mask <- (temp_2$Condition == unlist(flag_after[i, "Condition" ])
+     ) & (temp_2$Experiment == unlist(flag_after[i, "Experiment" ])
+     ) & (temp_2$Inj_Cell == unlist(flag_after[i, "Inj_Cell" ])
+     ) & (temp_2$Time >= unlist(flag_after[i, "Time"]))
+
+  temp_2[mask, "remove"] <- TRUE 
+}
+
+
+# temp_2 <- temp_2[!temp_2$remove, ]
+```
+
+
+```{r}
+### Does the full set fit?
+fm <- drm(gj ~ Time, Condition,
+          data = temp_2[!temp_2$remove,],
+          fct = AR.2(),
+          pmodels = list(~factor(Condition), #~1,
+                         ~1))
+
+fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_2 %>% 
+  ggplot(aes(Time, gj, color = remove))+
+  geom_line(aes(y = median_gj+threshold_change_res), color = "red", size = 1)+
+  geom_line(aes(y = median_gj), color = "red", size = 1)+
+  geom_line(aes(y = median_gj-threshold_change_res), color = "red", size = 1)+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'Black', size = 1)+
+  # labs(title = ith_condition)+
+  facet_grid(.~Condition)
+```
+
+```{r}
+### Does the full set fit?
+fm <- drm(gj ~ Time, Condition,
+          data = temp_2[!temp_2$remove,],
+          fct = AR.2(),
+          pmodels = list(~factor(Condition), #~1,
+                         #~1))
+                         ~factor(Condition)))
+
+fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_2 %>% 
+  ggplot(aes(Time, gj, color = remove))+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'Black', size = 1)+
+  # labs(title = ith_condition)+
+  facet_grid(.~Condition)
+```
+
+
+# Global application
+```{r}
+threshold_change = 21.4  #1.5 # <- what is the largest change in 20 minutes that we're willing to accept as real?
+threshold_change_res = 1.5
+
+ith_condition = c(
+    "PS.0.High.Amp",  "PS.22.High.Amp",
+    "PS.90.HA.Cd",    "PS.90.HA",
+    "PS.0", "PS.22", "PS.45", "PS.90")
+
+temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+
+head(temp_2)
+
+# Get stepwise change
+temp_2_diff = temp_2 %>% 
+  pivot_wider(names_from =  Time, values_from = gj) %>% 
+  mutate(delta00 = 0,
+         delta20 = `20`-`0`,
+         delta40 = `40`-`20`,
+         delta60 = `60`-`40`,
+         delta80 = `80`-`60`
+         ) %>% 
+  pivot_longer(c(delta00, delta20, delta40, delta60
+                 , delta80
+                 ), 
+               names_to = "dTime", values_to = "diffgj") %>% 
+  dplyr::select(Condition, Experiment, Inj_Cell, dTime, diffgj) %>% 
+  mutate(Time = as.numeric(str_remove(dTime, "delta"))) %>% 
+  dplyr::select(-dTime)
+
+
+
+temp_2 = full_join(temp_2, temp_2_diff)
+
+# Try adding in residual from groupxtime change
+temp_2 <- temp_2 %>%
+  ungroup() %>%
+  group_by(Condition, Time) %>%
+  mutate(median_gj = median(gj, na.rm = T)) %>%
+  mutate(residual_gj = median_gj - gj) %>%
+  ungroup()
+
+
+
+temp_2["absdiffgj"] <- abs(temp_2$diffgj)
+temp_2["absresidgj"] <- abs(temp_2$residual_gj)
+
+
+temp_2["remove"] = FALSE
+temp_2 <- temp_2[!is.na(temp_2$gj), ]
+temp_2[temp_2$absdiffgj > threshold_change, "remove"] = TRUE
+# and add in residual
+temp_2[temp_2$absresidgj > threshold_change_res, "remove"] = TRUE
+
+
+temp_2$Condition <- as.character(temp_2$Condition)
+# flag everything after the first deviation
+# assume that if an experiment fails, every time point after it is not to be trusted.
+flag_after <- temp_2[temp_2$remove, ]
+
+for(i in seq(1, nrow(flag_after))){
+ mask <- (temp_2$Condition == unlist(flag_after[i, "Condition" ])
+     ) & (temp_2$Experiment == unlist(flag_after[i, "Experiment" ])
+     ) & (temp_2$Inj_Cell == unlist(flag_after[i, "Inj_Cell" ])
+     ) & (temp_2$Time >= unlist(flag_after[i, "Time"]))
+
+  temp_2[mask, "remove"] <- TRUE 
+}
+```
+
+## first comparison
+```{r}
+ith_condition = c(
+    "PS.0.High.Amp",  "PS.22.High.Amp"#,
+    # "PS.90.HA.Cd",    "PS.90.HA",
+    # "PS.0", "PS.22", "PS.45", "PS.90"
+    )
+
+temp_subset <- temp_2[!temp_2$remove,] %>% 
+  filter(Condition %in% ith_condition)
+
+### Does the full set fit?
+fm <- drm(gj ~ Time, Condition,
+          data = temp_subset,
+          fct = AR.2(),
+          pmodels = list(~factor(Condition), #~1,
+                         ~1))
+
+fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_subset %>% 
+  ggplot(aes(Time, gj))+
+  # geom_line(aes(y = median_gj+threshold_change_res), color = "cornflowerblue", size = 1)+
+  # geom_line(aes(y = median_gj), color = "cornflowerblue", size = 1)+
+  # geom_line(aes(y = median_gj-threshold_change_res), color = "cornflowerblue", size = 1)+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'red', size = 1)+
+  facet_grid(.~Condition)
+
+
+fm_reduced = drm(gj ~ Time, Condition,
+              data = temp_subset, fct = AR.2(),
+              pmodels = list(~1,~1))
+# is using the treatment effect justified?
+anova(fm, fm_reduced)
+# ED(fm, c(10, 50, 90))
+compParm(fm, "d")
+```
+
+## secopnd comparison
+```{r}
+ith_condition = c(
+    # "PS.0.High.Amp",  "PS.22.High.Amp"#,
+    "PS.90.HA.Cd",    "PS.90.HA"#,
+    # "PS.0", "PS.22", "PS.45", "PS.90"
+    )
+
+temp_subset <- temp_2[!temp_2$remove,] %>% 
+  filter(Condition %in% ith_condition)
+
+### Does the full set fit?
+fm <- drm(gj ~ Time, Condition,
+          data = temp_subset,
+          fct = AR.2(),
+          pmodels = list(~factor(Condition), #~1,
+                         ~1))
+
+fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_subset %>% 
+  ggplot(aes(Time, gj))+
+  # geom_line(aes(y = median_gj+threshold_change_res), color = "cornflowerblue", size = 1)+
+  # geom_line(aes(y = median_gj), color = "cornflowerblue", size = 1)+
+  # geom_line(aes(y = median_gj-threshold_change_res), color = "cornflowerblue", size = 1)+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'red', size = 1)+
+  facet_grid(.~Condition)
+
+
+fm_reduced = drm(gj ~ Time, Condition,
+              data = temp_subset, fct = AR.2(),
+              pmodels = list(~1,~1))
+# is using the treatment effect justified?
+anova(fm, fm_reduced)
+# ED(fm, c(10, 50, 90))
+compParm(fm, "d")
+```
+
+
+## third comparison
+```{r}
+ith_condition = c(
+    # "PS.0.High.Amp",  "PS.22.High.Amp"#,
+    # "PS.90.HA.Cd",    "PS.90.HA",
+    "PS.0", "PS.22", "PS.45", "PS.90"
+    )
+
+temp_subset <- temp_2[!temp_2$remove,] %>% 
+  filter(Condition %in% ith_condition)
+
+### Does the full set fit?
+fm <- drm(gj ~ Time, Condition,
+          data = temp_subset,
+          fct = AR.2(),
+          pmodels = list(~factor(Condition), #~1,
+                         ~1))
+
+fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_subset %>% 
+  ggplot(aes(Time, gj))+
+  # geom_line(aes(y = median_gj+threshold_change_res), color = "cornflowerblue", size = 1)+
+  # geom_line(aes(y = median_gj), color = "cornflowerblue", size = 1)+
+  # geom_line(aes(y = median_gj-threshold_change_res), color = "cornflowerblue", size = 1)+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'red', size = 1)+
+  facet_grid(.~Condition)
+
+
+fm_reduced = drm(gj ~ Time, Condition,
+              data = temp_subset, fct = AR.2(),
+              pmodels = list(~1,~1))
+# is using the treatment effect justified?
+anova(fm, fm_reduced)
+# ED(fm, c(10, 50, 90))
+compParm(fm, "d")
 ```
 
 

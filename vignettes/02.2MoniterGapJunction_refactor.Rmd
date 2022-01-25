@@ -504,7 +504,8 @@ return(temp_2)
 
 
 # diagnostic plot --------------------------------------------------------------
-annotated_delta_df_diagnostic <- function(df){
+annotated_delta_df_diagnostic <- function(df,
+                              threshold_change_res = 1.5){
   temp_2 <- df
   plt <- temp_2 %>% 
     ggplot(aes(Time, gj, color = remove))+
@@ -521,24 +522,9 @@ annotated_delta_df_diagnostic <- function(df){
   return(plt)
 }
 
-```
 
-
-```{r}
-temp_2 <- mk_annotated_delta_df(
-  all.data = all.data,
-  threshold_change = 21.4,  
-  threshold_change_res = 1.5,
-  ith_condition = c("PS.0", "PS.22", "PS.45", "PS.90")
-)
-
-
-
-annotated_delta_df_diagnostic(df = temp_2)
-
-
-
-
+# Models to compare ------------------------------------------------------------
+## Full model
 mk_asymptotic_model <- function(
   df = temp_2,
   apply_qc = TRUE
@@ -561,7 +547,7 @@ mk_asymptotic_model <- function(
   return(fm)
 }
 
-
+## Reduced Model
 mk_reduced_asymptotic_model <- function(
     df = temp_2,
   apply_qc = TRUE
@@ -585,6 +571,58 @@ mk_reduced_asymptotic_model <- function(
 }
 
 
+# Compare Models ---------------------------------------------------------------
+# returns anova table, d effect table
+mk_tables <- function(fm, fm_reduced){
+  # is using the treatment effect justified?
+  ares <- anova(fm, fm_reduced) # note that the "1st" model is not the first one
+                                # input but the simpler one.
+  ares_p <- ares[2, 'p value']
+  if(ares_p < 0.05){
+    print("P < 0.05")
+  } else {
+    print("Warning P >= 0.05")
+  }
+  
+  fmres <- compParm(fm, "d")
+  
+  return(list(ares, fmres))
+}
+
+
+
+
+
+#fcn that takes fm, time and returns predictions
+mk_fm_plotting_df <- function(df = temp_2, 
+                              fm = fm){
+  fm_line <- data.frame(expand.grid(
+  Time = seq(0, max(df$Time, na.rm = TRUE), by  = 1), 
+  Condition = unique(df$Condition) 
+  ))
+
+  fm_line <- cbind(fm_line, predict(fm, newdata = fm_line, se.fit = TRUE))
+  # SE is only provided once, apply to rest of data.
+  fm_line_se <- fm_line[!is.na(fm_line$SE), c('Time', 'SE')]
+  fm_line <- fm_line %>% dplyr::select(-SE)
+  fm_line <- full_join(fm_line, fm_line_se)
+  return(fm_line)
+}
+
+```
+
+
+```{r}
+temp_2 <- mk_annotated_delta_df(
+  all.data = all.data,
+  threshold_change = 21.4,  
+  threshold_change_res = 1.5,
+  ith_condition = c("PS.0", "PS.22", "PS.45", "PS.90")
+)
+
+
+annotated_delta_df_diagnostic(df = temp_2,
+                              threshold_change_res = 1.5)
 
 
 fm <- mk_asymptotic_model(
@@ -599,66 +637,67 @@ fm_reduced <- mk_reduced_asymptotic_model(
 )
 
 
-# is using the treatment effect justified?
-anova(fm, fm_reduced) # note that the "1st" model is not the first one input but the simpler one.
-# ED(fm, c(10, 50, 90))
-compParm(fm, "d")
+res <- mk_tables(fm, fm_reduced)
+main_effect <- res[[1]]
+compare_d <- res[[2]]
+
+predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
 
 
- 
-# # is using the treatment effect justified?
-# anova(fm_full, fm_reduced)
-# 
-# # ED(fm, c(10, 50, 90))
-# compParm(fm_full, "d")
-
-
-
-
-
-#TODO fcn that takes fm, time and returns predictions
 
 
 
 #TODO fcn that takes predictions, data and plots a second diagnostic
 # this is what will be tweaked to be the final plot
+delta_df_prediction_plot <- function(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions
+){
+  if(apply_qc){
+    df <- df[!df$remove,]  
+  }
+  
+  # sem lower and upper
+  predictions['SEML'] <-   predictions['Prediction'] - predictions['SE']
+  predictions['SEMU'] <-   predictions['Prediction'] + predictions['SE']  
+  
+  
+  ### Does the fit look reasonable?
+  plt <- df %>% 
+    ggplot(aes(Time, gj))+ #, color = remove))+
+    geom_hline(yintercept = 0)+
+    geom_point()+
+    geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+    geom_line(data = predictions, aes(y = Prediction),  color = 'red', size = 1)+
+    geom_ribbon(data = predictions, aes(ymin=SEML, ymax=SEMU), 
+                fill = "gray", color = "black", alpha = 1)+
+    
+    facet_grid(.~Condition)
+  
+  return(plt)
+}
+
+delta_df_prediction_plot(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions)
 
 
 
 
-### Does the full set fit?
 
 
-fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
-fm_line["gj"] <- predict(fm, newdata = fm_line)
-### Does the fit look reasonable?
-temp_2 %>% 
-  ggplot(aes(Time, gj, color = remove))+
-  geom_line(aes(y = median_gj+threshold_change_res), color = "red", size = 1)+
-  geom_line(aes(y = median_gj), color = "red", size = 1)+
-  geom_line(aes(y = median_gj-threshold_change_res), color = "red", size = 1)+
-  geom_hline(yintercept = 0)+
-  geom_point()+
-  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
-  geom_line(data = fm_line, color = 'Black', size = 1)+
-  # labs(title = ith_condition)+
-  facet_grid(.~Condition)
+
+
+
+
+
+
 
 ```
 
 
-```{r}
-# TODO make comparison model
-
-fm_reduced = drm(gj ~ Time, Condition,
-              data = temp_subset, fct = AR.2(),
-              pmodels = list(~1,~1))
-
-```
-
-```{r}
-
-```
 
 ## Plotting
 

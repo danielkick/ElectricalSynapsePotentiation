@@ -388,6 +388,286 @@ plt.lv <- M.clean[M.clean$Condition %in% c("PS.0", "PS.22", "PS.45", "PS.90"), ]
 ```
 
 
+# Delta GJ Statistics
+## Filtering
+
+
+```{r}
+mk_annotated_delta_df <- function(
+all.data = all.data,
+# what is the largest change in 20 minutes that we're willing to accept as real?
+# to be useful this might be something on the order of 1.5 but can be set high
+# to use only threshold change on the residual relative to the median.
+threshold_change = 21.4,  
+# relative to the median.
+threshold_change_res = 1.5,
+ith_condition = c("PS.0", "PS.22", "PS.45", "PS.90")
+){
+# # inputs
+# all.data = all.data
+# threshold_change = 21.4  #1.5 #
+# threshold_change_res = 1.5
+# ith_condition = c("PS.0", "PS.22", "PS.45", "PS.90")
+  
+## Calculate baseline, deltas ==================================================
+temp <- all.data %>% dplyr::select(Condition, Experiment, Inj_Cell, Time, gj)
+
+# Get baseline values so we can easily replace with deltas
+temp.t0 <- temp %>%
+  dplyr::filter(Time == 0) %>%
+  rename(initial = gj) %>%
+  dplyr::select(-Time)
+
+temp <- full_join(temp, temp.t0)
+temp$gj = temp$gj - temp$initial
+
+temp$Time <- as.numeric(temp$Time)
+
+# reduce down to target conditions
+temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+
+# Check if there's an 80 minute time point. calculate delta accordingly
+if (80 %in% unique(temp_2$Time) ){
+  # Get stepwise change
+  temp_2_diff = temp_2 %>% 
+    pivot_wider(names_from =  Time, values_from = gj) %>% 
+    mutate(delta00 = 0,
+           delta20 = `20`-`0`,
+           delta40 = `40`-`20`,
+           delta60 = `60`-`40`,
+           delta80 = `80`-`60`
+           ) %>% 
+    pivot_longer(c(delta00, delta20, delta40, delta60
+                   , delta80
+                   ), 
+                 names_to = "dTime", values_to = "diffgj") %>% 
+    dplyr::select(Condition, Experiment, Inj_Cell, dTime, diffgj) %>% 
+    mutate(Time = as.numeric(str_remove(dTime, "delta"))) %>% 
+    dplyr::select(-dTime)
+} else {
+  temp_2_diff = temp_2 %>% 
+    pivot_wider(names_from =  Time, values_from = gj) %>% 
+    mutate(delta00 = 0,
+           delta20 = `20`-`0`,
+           delta40 = `40`-`20`,
+           delta60 = `60`-`40`
+           ) %>% 
+    pivot_longer(c(delta00, delta20, delta40, delta60
+                   ), 
+                 names_to = "dTime", values_to = "diffgj") %>% 
+    dplyr::select(Condition, Experiment, Inj_Cell, dTime, diffgj) %>% 
+    mutate(Time = as.numeric(str_remove(dTime, "delta"))) %>% 
+    dplyr::select(-dTime)  
+}
+
+temp_2 = full_join(temp_2, temp_2_diff)
+
+
+## Calculate selection metrics =================================================
+# Try adding in residual from groupxtime change
+temp_2 <- temp_2 %>%
+  ungroup() %>%
+  group_by(Condition, Time) %>%
+  mutate(median_gj = median(gj, na.rm = T)) %>%
+  mutate(residual_gj = median_gj - gj) %>%
+  ungroup()
+
+temp_2["absdiffgj"] <- abs(temp_2$diffgj)
+temp_2["absresidgj"] <- abs(temp_2$residual_gj)
+
+
+## Flag all points after an offending observation ==============================
+temp_2["remove"] = FALSE
+temp_2 <- temp_2[!is.na(temp_2$gj), ]
+temp_2[temp_2$absdiffgj > threshold_change, "remove"] = TRUE
+# and add in residual
+temp_2[temp_2$absresidgj > threshold_change_res, "remove"] = TRUE
+
+temp_2$Condition <- as.character(temp_2$Condition)
+# flag everything after the first deviation
+# assume that if an experiment fails, every time point after it is not to be trusted.
+flag_after <- temp_2[temp_2$remove, ]
+
+for(i in seq(1, nrow(flag_after))){
+ mask <- (temp_2$Condition == unlist(flag_after[i, "Condition" ])
+     ) & (temp_2$Experiment == unlist(flag_after[i, "Experiment" ])
+     ) & (temp_2$Inj_Cell == unlist(flag_after[i, "Inj_Cell" ])
+     ) & (temp_2$Time >= unlist(flag_after[i, "Time"]))
+
+  temp_2[mask, "remove"] <- TRUE 
+}
+## =============================================================================
+
+return(temp_2)
+  
+}
+
+
+# diagnostic plot --------------------------------------------------------------
+annotated_delta_df_diagnostic <- function(df){
+  temp_2 <- df
+  plt <- temp_2 %>% 
+    ggplot(aes(Time, gj, color = remove))+
+    geom_ribbon(aes(ymin=median_gj-threshold_change_res, 
+                    ymax=median_gj+threshold_change_res), 
+                fill = "gray", color = "black", alpha = 1)+
+    geom_line(aes(y = median_gj), color = "black", size = 1)+
+    geom_hline(yintercept = 0)+
+    geom_point()+
+    geom_point(shape = 1, color = 'black')+
+    geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+    facet_grid(.~Condition)+
+    theme(legend.position = 'bottom')
+  return(plt)
+}
+
+```
+
+
+```{r}
+temp_2 <- mk_annotated_delta_df(
+  all.data = all.data,
+  threshold_change = 21.4,  
+  threshold_change_res = 1.5,
+  ith_condition = c("PS.0", "PS.22", "PS.45", "PS.90")
+)
+
+
+
+annotated_delta_df_diagnostic(df = temp_2)
+
+
+
+
+mk_asymptotic_model <- function(
+  df = temp_2,
+  apply_qc = TRUE
+){
+  if(apply_qc){
+    # fit model with condition affecting intercept but not time constant
+    fm <- drm(gj ~ Time, Condition,
+            data = df[!df$remove,],
+            fct = AR.2(),
+            pmodels = list(~factor(Condition), 
+                           ~1))
+  } else {
+    # This is expected to fail in some cases. Not intended to be used.
+    fm <- drm(gj ~ Time, Condition,
+          data = df,
+          fct = AR.2(),
+          pmodels = list(~factor(Condition), 
+                         ~1))
+  }
+  return(fm)
+}
+
+
+mk_reduced_asymptotic_model <- function(
+    df = temp_2,
+  apply_qc = TRUE
+){
+  if(apply_qc){
+    # fit model with condition affecting intercept but not time constant
+    fm <- drm(gj ~ Time, Condition,
+            data = df[!df$remove,],
+            fct = AR.2(),
+            pmodels = list(~1, 
+                           ~1))
+  } else {
+    # This is expected to fail in some cases. Not intended to be used.
+    fm <- drm(gj ~ Time, Condition,
+          data = df,
+          fct = AR.2(),
+          pmodels = list(~1, 
+                         ~1))
+  }
+  return(fm)
+}
+
+
+
+
+fm <- mk_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+
+fm_reduced <- mk_reduced_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+
+# is using the treatment effect justified?
+anova(fm, fm_reduced) # note that the "1st" model is not the first one input but the simpler one.
+# ED(fm, c(10, 50, 90))
+compParm(fm, "d")
+
+
+ 
+# # is using the treatment effect justified?
+# anova(fm_full, fm_reduced)
+# 
+# # ED(fm, c(10, 50, 90))
+# compParm(fm_full, "d")
+
+
+
+
+
+#TODO fcn that takes fm, time and returns predictions
+
+
+
+#TODO fcn that takes predictions, data and plots a second diagnostic
+# this is what will be tweaked to be the final plot
+
+
+
+
+### Does the full set fit?
+
+
+fm_line <- data.frame(expand.grid(Time = seq(0, 80), Condition = ith_condition))
+fm_line["gj"] <- predict(fm, newdata = fm_line)
+### Does the fit look reasonable?
+temp_2 %>% 
+  ggplot(aes(Time, gj, color = remove))+
+  geom_line(aes(y = median_gj+threshold_change_res), color = "red", size = 1)+
+  geom_line(aes(y = median_gj), color = "red", size = 1)+
+  geom_line(aes(y = median_gj-threshold_change_res), color = "red", size = 1)+
+  geom_hline(yintercept = 0)+
+  geom_point()+
+  geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
+  geom_line(data = fm_line, color = 'Black', size = 1)+
+  # labs(title = ith_condition)+
+  facet_grid(.~Condition)
+
+```
+
+
+```{r}
+# TODO make comparison model
+
+fm_reduced = drm(gj ~ Time, Condition,
+              data = temp_subset, fct = AR.2(),
+              pmodels = list(~1,~1))
+
+```
+
+```{r}
+
+```
+
+## Plotting
+
+
+
+
+
+
+
 
 # Workspace
 
@@ -1419,8 +1699,6 @@ compParm(fm, "d")
 #   rename(gj = Prediction)
 
 ```
-
-
 
 
 

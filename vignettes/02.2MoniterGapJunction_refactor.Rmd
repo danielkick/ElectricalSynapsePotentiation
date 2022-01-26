@@ -389,9 +389,7 @@ plt.lv <- M.clean[M.clean$Condition %in% c("PS.0", "PS.22", "PS.45", "PS.90"), ]
 
 
 # Delta GJ Statistics
-## Filtering
-
-
+## Functions
 ```{r}
 mk_annotated_delta_df <- function(
 all.data = all.data,
@@ -614,6 +612,19 @@ mk_tables <- function(fm, fm_reduced){
   return(list(ares, fmres))
 }
 
+# wrap mk tables and save out stats
+write_out_fm_res <- function(fm = fm, 
+                             fm_reduced = fm_reduced,
+                             save_suffix = ""){
+  res <- mk_tables(fm, fm_reduced)
+  main_effect <- res[[1]]
+  compare_d <- res[[2]]
+  write.csv(main_effect, file = paste0("./a_reg_main_", save_suffix, ".csv"))
+  write.csv(compare_d,   file = paste0("./a_reg_d_",    save_suffix, ".csv"))
+  return(list(main_effect, compare_d))
+}
+
+
 
 #fcn that takes fm, time and returns predictions
 mk_fm_plotting_df <- function(df = temp_2, 
@@ -663,14 +674,113 @@ delta_df_prediction_plot <- function(
 ```
 
 
+
+
+### tea
 ```{r}
 temp_2 <- mk_annotated_delta_df(
   all.data = all.data,
-  threshold_change = 1.07,     # 
-  threshold_change_res = 1.16, # <- max groupwise collapsed iqr
-  # TODO   could this ^ be applied groupwise? That might fix this issue
-  ith_condition = c("PS.0", "PS.22", "PS.45", "PS.90")
+  threshold_change = 100.07,     # 
+  threshold_change_res = 1.63, # <- max groupwise collapsed iqr
+  ith_condition = c("PS.0.High.Amp",  "PS.22.High.Amp")
 )
+
+
+# for selecting a reasonable cutoff for threshold change residual
+get_grouped_iqrs(df = temp_2)
+
+get_grouped_iqrs_collapse_to_time(df = temp_2)
+
+plt1 <- annotated_delta_df_diagnostic(df = temp_2,
+                                      threshold_change_res = 1.5)
+
+
+fm <- mk_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+
+fm_reduced <- mk_reduced_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+write_out_fm_res(
+  fm = fm, 
+  fm_reduced = fm_reduced,
+  save_suffix = "Standardized")
+
+
+predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
+
+
+plt2 <- delta_df_prediction_plot(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions)
+
+plt1 + plt2 
+
+
+
+```
+
+### ha (reality check)
+```{r}
+temp_2 <- mk_annotated_delta_df(
+  all.data = all.data,
+  threshold_change = 100.07,     # 
+  threshold_change_res = 1.63, # <- max groupwise collapsed iqr
+  ith_condition = c("PS.22.High.Amp", "PS.90.HA")
+)
+
+# for selecting a reasonable cutoff for threshold change residual
+get_grouped_iqrs(df = temp_2)
+
+get_grouped_iqrs_collapse_to_time(df = temp_2)
+
+plt1 <- annotated_delta_df_diagnostic(df = temp_2,
+                                      threshold_change_res = 1.5)
+
+fm <- mk_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+
+fm_reduced <- mk_reduced_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+write_out_fm_res(
+  fm = fm, 
+  fm_reduced = fm_reduced,
+  save_suffix = "Standardized")
+
+predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
+
+plt2 <- delta_df_prediction_plot(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions)
+
+plt1 + plt2 
+
+
+```
+
+### ha (actual)
+```{r}
+temp_2 <- mk_annotated_delta_df(
+  all.data = all.data,
+  threshold_change = 100.07,     # 
+  threshold_change_res = 1.23, # <- max groupwise collapsed iqr
+  ith_condition = c("PS.90.HA", "PS.90.HA.Cd")
+)
+
+
 
 
 # for selecting a reasonable cutoff for threshold change residual
@@ -692,31 +802,68 @@ fm_reduced <- mk_reduced_asymptotic_model(
   apply_qc = TRUE
 )
 
-
-res <- mk_tables(fm, fm_reduced)
-main_effect <- res[[1]]
-compare_d <- res[[2]]
+write_out_fm_res(
+  fm = fm, 
+  fm_reduced = fm_reduced,
+  save_suffix = "Standardized")
 
 predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
 
-#TODO recalculate and add in summary bands.
 plt2 <- delta_df_prediction_plot(
   df = temp_2,
   apply_qc = TRUE,
   predictions = predictions)
 
-plt1+theme_linedraw() + plt2+theme_linedraw() 
+plt1 + plt2 
+
+
 ```
 
-
+### standardized
 
 ```{r}
+temp_2 <- mk_annotated_delta_df(
+  all.data = all.data,
+  threshold_change = 100.07,     # 
+  threshold_change_res = 1.16, # <- max groupwise collapsed iqr
+  ith_condition = c("PS.0", "PS.22", "PS.45", "PS.90")
+)
+
+# for selecting a reasonable cutoff for threshold change residual
+get_grouped_iqrs(df = temp_2)
+
+get_grouped_iqrs_collapse_to_time(df = temp_2)
+
+plt1 <- annotated_delta_df_diagnostic(df = temp_2,
+                                      threshold_change_res = 1.5)
+
+fm <- mk_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
 
 
+fm_reduced <- mk_reduced_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+write_out_fm_res(
+  fm = fm, 
+  fm_reduced = fm_reduced,
+  save_suffix = "Standardized")
+
+predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
+
+plt2 <- delta_df_prediction_plot(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions)
+
+plt1 + plt2 
 
 
 ```
-
 
 
 

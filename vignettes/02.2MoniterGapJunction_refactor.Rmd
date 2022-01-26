@@ -502,7 +502,7 @@ return(temp_2)
   
 }
 
-
+# summary and diagnostics 
 # diagnostic plot --------------------------------------------------------------
 annotated_delta_df_diagnostic <- function(df,
                               threshold_change_res = 1.5){
@@ -521,6 +521,31 @@ annotated_delta_df_diagnostic <- function(df,
     theme(legend.position = 'bottom')
   return(plt)
 }
+
+
+
+get_grouped_iqrs <- function(df = temp_2){
+  df %>% 
+    group_by(Condition, Time) %>% 
+    summarize(iqr = IQR(gj, na.rm = T)) %>% 
+    pivot_wider(id_cols = Condition, 
+                names_from = Time, 
+                values_from = iqr)  
+}
+
+# get groupwise iqr, summarize at time points
+get_grouped_iqrs_collapse_to_time <- function(df = temp_2){
+  df %>% 
+    group_by(Condition, Time) %>% 
+    summarize(iqr = IQR(gj, na.rm = T)) %>% 
+    ungroup() %>% 
+    group_by(Time) %>% 
+    summarize(
+      min_iqr  = min(iqr, na.rm = T),
+      mean_iqr = mean(iqr, na.rm = T),
+      max_iqr  = max(iqr, na.rm = T) )   
+}
+
 
 
 # Models to compare ------------------------------------------------------------
@@ -590,9 +615,6 @@ mk_tables <- function(fm, fm_reduced){
 }
 
 
-
-
-
 #fcn that takes fm, time and returns predictions
 mk_fm_plotting_df <- function(df = temp_2, 
                               fm = fm){
@@ -609,21 +631,55 @@ mk_fm_plotting_df <- function(df = temp_2,
   return(fm_line)
 }
 
+
+
+#fcn that takes predictions, data and plots a second diagnostic
+# this is what will be tweaked to be the final plot
+delta_df_prediction_plot <- function(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions
+){
+  if(apply_qc){
+    df <- df[!df$remove,]  
+  }
+  # sem lower and upper
+  predictions['SEML'] <-   predictions['Prediction'] - predictions['SE']
+  predictions['SEMU'] <-   predictions['Prediction'] + predictions['SE']  
+  
+  ### Does the fit look reasonable?
+  plt <- df %>% 
+    ggplot(aes(Time))+ #, color = remove))+
+    geom_hline(yintercept = 0)+
+    geom_ribbon(data = predictions, aes(ymin=SEML, ymax=SEMU), 
+                fill = "gray", color = "black", alpha = 1)+
+    geom_point(aes(y=gj))+
+    geom_line(aes(y=gj, group = interaction(Experiment, Inj_Cell)))+
+    geom_line(data = predictions, aes(y = Prediction), color = 'red', size = 1)+
+    facet_grid(.~Condition)
+  
+  return(plt)
+}
 ```
 
 
 ```{r}
 temp_2 <- mk_annotated_delta_df(
   all.data = all.data,
-  threshold_change = 21.4,  
-  threshold_change_res = 1.5,
+  threshold_change = 1.07,     # 
+  threshold_change_res = 1.16, # <- max groupwise collapsed iqr
+  # TODO   could this ^ be applied groupwise? That might fix this issue
   ith_condition = c("PS.0", "PS.22", "PS.45", "PS.90")
 )
 
 
-annotated_delta_df_diagnostic(df = temp_2,
-                              threshold_change_res = 1.5)
+# for selecting a reasonable cutoff for threshold change residual
+get_grouped_iqrs(df = temp_2)
 
+get_grouped_iqrs_collapse_to_time(df = temp_2)
+
+plt1 <- annotated_delta_df_diagnostic(df = temp_2,
+                                      threshold_change_res = 1.5)
 
 fm <- mk_asymptotic_model(
   df = temp_2,
@@ -643,59 +699,26 @@ compare_d <- res[[2]]
 
 predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
 
-
-
-
-
-#TODO fcn that takes predictions, data and plots a second diagnostic
-# this is what will be tweaked to be the final plot
-delta_df_prediction_plot <- function(
-  df = temp_2,
-  apply_qc = TRUE,
-  predictions = predictions
-){
-  if(apply_qc){
-    df <- df[!df$remove,]  
-  }
-  
-  # sem lower and upper
-  predictions['SEML'] <-   predictions['Prediction'] - predictions['SE']
-  predictions['SEMU'] <-   predictions['Prediction'] + predictions['SE']  
-  
-  
-  ### Does the fit look reasonable?
-  plt <- df %>% 
-    ggplot(aes(Time, gj))+ #, color = remove))+
-    geom_hline(yintercept = 0)+
-    geom_point()+
-    geom_line(aes(group = interaction(Experiment, Inj_Cell)))+
-    geom_line(data = predictions, aes(y = Prediction),  color = 'red', size = 1)+
-    geom_ribbon(data = predictions, aes(ymin=SEML, ymax=SEMU), 
-                fill = "gray", color = "black", alpha = 1)+
-    
-    facet_grid(.~Condition)
-  
-  return(plt)
-}
-
-delta_df_prediction_plot(
+#TODO recalculate and add in summary bands.
+plt2 <- delta_df_prediction_plot(
   df = temp_2,
   apply_qc = TRUE,
   predictions = predictions)
 
+plt1+theme_linedraw() + plt2+theme_linedraw() 
+```
 
 
 
-
-
-
-
-
+```{r}
 
 
 
 
 ```
+
+
+
 
 
 

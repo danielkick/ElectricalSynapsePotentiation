@@ -726,120 +726,137 @@ plt1 + plt2
 
 
 ```{r}
-df = temp_2
-apply_qc = TRUE
-predictions = predictions
-
-text.size = 20
-point.size = 2
-line.size = 3
-mean.point.size = 2
-mean.line.size = 2
-ylab_expression = expression(paste(Delta, "gj"^-1, " in M", Omega))
-
-
-
 # extends delta_df_prediction_plot to have similar aes to the previous plot set.
 # bands are sd 
 # red lines are predition and sem
-delta_df_publication_plot <- function(){
-  
-}
-
-
-if(apply_qc){
-  df <- df[!df$remove,]  
-}
-# sem lower and upper
-predictions['SEML'] <-   predictions['Prediction'] - predictions['SE']
-predictions['SEMU'] <-   predictions['Prediction'] + predictions['SE']  
-
-
-# keep line form extending past data
-
-for (condition in unique(df$Condition)){
-  condition_max_time = max( df[df$Condition == condition, 'Time'], na.rm = TRUE)
-  mask <- (predictions$Condition != condition
-           ) | ((predictions$Condition == condition
-            ) & (predictions$Time <= condition_max_time)) 
-  
-  predictions <- predictions[mask, ]
-}
-
-
-summary_stats <- df %>% 
-  group_by(Condition, Time) %>% 
-  summarise(mean = mean(gj, na.rm = T),
-            median = median(gj, na.rm = T),
-            iqr = IQR(gj, na.rm = T),
-            sd = sd(gj, na.rm = T)) %>% 
-  ungroup() %>% 
-  mutate(mean_up = mean +sd,
-         mean_do = mean -sd,
-         med_up = median+iqr, # TODO do we want to show 1 or 1/2?
-         med_do = median-iqr)
-
-
-### Does the fit look reasonable?
-plt <- df %>% 
-  ggplot(aes(Time))+ #, color = remove))+
-  geom_hline(yintercept = 0)+
-  ## Bands ==============================================================
-  geom_ribbon(data = summary_stats, aes(ymin=mean_do, ymax=mean_up), 
-              fill = "cornflowerblue", 
-              #color = "cornflowerblue", 
-              alpha = 0.3)+
-  
-  geom_line(data = predictions, aes(y = Prediction), 
-          color = 'firebrick', size = 1, alpha = 0.5)+
-  geom_line(data = predictions, aes(y = SEML), 
-          color = 'firebrick', size = 1, alpha = 0.5, linetype = 'dashed')+
-  geom_line(data = predictions, aes(y = SEMU), 
-          color = 'firebrick', size = 1, alpha = 0.5, linetype = 'dashed')+
-
-  
-  # geom_ribbon(data = summary_stats, aes(ymin=med_do, ymax=med_up),   # median
-  #             fill = "blue", color = "blue", alpha = 0.51)+
-  # geom_ribbon(data = predictions, aes(ymin=SEML, ymax=SEMU), # model
-  #             fill = "cornflowerblue", color = "cornflowerblue", alpha = 0.3)+
-
-  ## data ======================================================================
-  # geom_point(aes(y=gj))+
-  # geom_line(aes(y=gj, group = interaction(Experiment, Inj_Cell)))+
-  lemon::geom_pointline(aes(y=gj, group = interaction(Experiment, Inj_Cell)),
-                        color = "cornflowerblue", size = point.size, 
-                        linesize = line.size, alpha = 0.5)+
-  
-  # geom_point(data = summary_stats, aes(x = Time, y = mean), 
-  #            color = "white", size = mean.point.size, alpha = 0.3)+
-  # geom_pointline(data = summary_stats, aes(x = Time, y = mean), 
-  #                color = "firebrick", size = mean.point.size, 
-  #                linesize = mean.line.size,  shape = 1)+
-  
-  ## lines =====================================================================
-  # # mean
-  # geom_line(data = summary_stats, aes(y = mean), 
-  #           color = 'cornflowerblue', size = 1)+
-  # # median
-  # geom_line(data = summary_stats, aes(y = median), 
-  #           color = 'blue', size = 1)+
+delta_df_publication_plot <- function(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions,
+  text.size = 20,
+  point.size = 2,
+  line.size = 3,
+  mean.point.size = 2,
+  mean.line.size = 2,
+  ylab_expression = expression(paste(Delta, "gj"^-1, " in M", Omega))
+){
+  # df = temp_2
+  # apply_qc = TRUE
+  # predictions = predictions
   # 
-
+  # text.size = 20
+  # point.size = 2
+  # line.size = 3
+  # mean.point.size = 2
+  # mean.line.size = 2
+  # ylab_expression = expression(paste(Delta, "gj"^-1, " in M", Omega))
   
-  facet_grid(.~Condition, labeller = labeller(Condition = condition.labs))+
-  labs(y = ylab_expression, x = "Time in Minutes")+
-  # facet_grid(.~Condition,
-            
-  geom_hline(yintercept = 0)+
-  theme(
-    # axis.text = element_text(size = rel(2), angle = 0),
-        text = element_text(size=text.size)
-        )
   
-plt
+  if(apply_qc){
+    df <- df[!df$remove,]  
+  }
+  # sem lower and upper
+  predictions['SEML'] <-   predictions['Prediction'] - predictions['SE']
+  predictions['SEMU'] <-   predictions['Prediction'] + predictions['SE']  
+  
+  
+  # keep line form extending past data
+  
+  for (condition in unique(df$Condition)){
+    condition_max_time = max( df[df$Condition == condition, 'Time'], na.rm = TRUE)
+    mask <- (predictions$Condition != condition
+             ) | ((predictions$Condition == condition
+              ) & (predictions$Time <= condition_max_time)) 
+    
+    predictions <- predictions[mask, ]
+  }
+  
+  
+  summary_stats <- df %>% 
+    group_by(Condition, Time) %>% 
+    summarise(mean = mean(gj, na.rm = T),
+              median = median(gj, na.rm = T),
+              iqr = IQR(gj, na.rm = T),
+              sd = sd(gj, na.rm = T)) %>% 
+    ungroup() %>% 
+    mutate(mean_up = mean +sd,
+           mean_do = mean -sd,
+           med_up = median+iqr, # TODO do we want to show 1 or 1/2?
+           med_do = median-iqr)
+  
+  
+  ### Does the fit look reasonable?
+  plt <- df %>% 
+    ggplot(aes(Time))+ #, color = remove))+
+    geom_hline(yintercept = 0)+
+    ## Bands ==============================================================
+    geom_ribbon(data = summary_stats, aes(ymin=mean_do, ymax=mean_up), 
+                fill = "cornflowerblue", 
+                #color = "cornflowerblue", 
+                alpha = 0.3)+
+    
+    geom_line(data = predictions, aes(y = Prediction), 
+            color = 'firebrick', size = 1, alpha = 0.5)+
+    geom_line(data = predictions, aes(y = SEML), 
+            color = 'firebrick', size = 1, alpha = 0.5, linetype = 'dashed')+
+    geom_line(data = predictions, aes(y = SEMU), 
+            color = 'firebrick', size = 1, alpha = 0.5, linetype = 'dashed')+
+  
+    
+    # geom_ribbon(data = summary_stats, aes(ymin=med_do, ymax=med_up),   # median
+    #             fill = "blue", color = "blue", alpha = 0.51)+
+    # geom_ribbon(data = predictions, aes(ymin=SEML, ymax=SEMU), # model
+    #             fill = "cornflowerblue", color = "cornflowerblue", alpha = 0.3)+
+  
+    ## data ======================================================================
+    # geom_point(aes(y=gj))+
+    # geom_line(aes(y=gj, group = interaction(Experiment, Inj_Cell)))+
+    lemon::geom_pointline(aes(y=gj, group = interaction(Experiment, Inj_Cell)),
+                          color = "cornflowerblue", size = point.size, 
+                          linesize = line.size, alpha = 0.5)+
+    
+    # geom_point(data = summary_stats, aes(x = Time, y = mean), 
+    #            color = "white", size = mean.point.size, alpha = 0.3)+
+    # geom_pointline(data = summary_stats, aes(x = Time, y = mean), 
+    #                color = "firebrick", size = mean.point.size, 
+    #                linesize = mean.line.size,  shape = 1)+
+    
+    ## lines =====================================================================
+    # # mean
+    # geom_line(data = summary_stats, aes(y = mean), 
+    #           color = 'cornflowerblue', size = 1)+
+    # # median
+    # geom_line(data = summary_stats, aes(y = median), 
+    #           color = 'blue', size = 1)+
+    # 
+  
+    
+    facet_grid(.~Condition, labeller = labeller(Condition = condition.labs))+
+    labs(y = ylab_expression, x = "Time in Minutes")+
+    # facet_grid(.~Condition,
+              
+    geom_hline(yintercept = 0)+
+    theme(
+      # axis.text = element_text(size = rel(2), angle = 0),
+          text = element_text(size=text.size)
+          )
+  return(plt)
+}
 
 
 
+
+
+delta_df_publication_plot(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions,
+  text.size = 20,
+  point.size = 2,
+  line.size = 3,
+  mean.point.size = 2,
+  mean.line.size = 2,
+  ylab_expression = expression(paste(Delta, "gj"^-1, " in M", Omega)))
 
 
 

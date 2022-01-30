@@ -846,7 +846,9 @@ plt2 <- delta_df_prediction_plot(
   apply_qc = TRUE,
   predictions = predictions)
 
-plt1 + plt2 
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
+       plot = diagnositc_plt) 
 
 
 plt <- delta_df_publication_plot(
@@ -921,7 +923,9 @@ plt2 <- delta_df_prediction_plot(
   apply_qc = TRUE,
   predictions = predictions)
 
-plt1 + plt2 
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
+       plot = diagnositc_plt) 
 
 
 plt <- delta_df_publication_plot(
@@ -991,7 +995,9 @@ plt2 <- delta_df_prediction_plot(
   apply_qc = TRUE,
   predictions = predictions)
 
-plt1 + plt2 
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
+       plot = diagnositc_plt) 
 
 plt <- delta_df_publication_plot(
   df = temp_2,
@@ -1084,7 +1090,9 @@ plt2 <- delta_df_prediction_plot(
   apply_qc = TRUE,
   predictions = predictions)
 
-plt1 + plt2 
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
+       plot = diagnositc_plt) 
 
 
 plt <- delta_df_publication_plot(
@@ -1173,7 +1181,9 @@ plt2 <- delta_df_prediction_plot(
   apply_qc = TRUE,
   predictions = predictions)
 
-plt1 + plt2 
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
+       plot = diagnositc_plt) 
 
 
 plt <- delta_df_publication_plot(
@@ -1262,7 +1272,9 @@ plt2 <- delta_df_prediction_plot(
   apply_qc = TRUE,
   predictions = predictions)
 
-plt1 + plt2 
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
+       plot = diagnositc_plt) 
 
 
 plt <- delta_df_publication_plot(
@@ -1355,7 +1367,9 @@ plt2 <- delta_df_prediction_plot(
   apply_qc = TRUE,
   predictions = predictions)
 
-plt1 + plt2 
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
+       plot = diagnositc_plt) 
 
 
 plt <- delta_df_publication_plot(
@@ -1444,7 +1458,9 @@ plt2 <- delta_df_prediction_plot(
   apply_qc = TRUE,
   predictions = predictions)
 
-plt1 + plt2 
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
+       plot = diagnositc_plt) 
 
 
 plt <- delta_df_publication_plot(
@@ -1533,7 +1549,9 @@ plt2 <- delta_df_prediction_plot(
   apply_qc = TRUE,
   predictions = predictions)
 
-plt1 + plt2 
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
+       plot = diagnositc_plt) 
 
 
 plt <- delta_df_publication_plot(
@@ -1625,7 +1643,9 @@ plt2 <- delta_df_prediction_plot(
   apply_qc = TRUE,
   predictions = predictions)
 
-plt1 + plt2 
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
+       plot = diagnositc_plt) 
 
 
 plt <- delta_df_publication_plot(
@@ -1714,7 +1734,9 @@ plt2 <- delta_df_prediction_plot(
   apply_qc = TRUE,
   predictions = predictions)
 
-plt1 + plt2 
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
+       plot = diagnositc_plt) 
 
 
 plt <- delta_df_publication_plot(
@@ -1803,7 +1825,9 @@ plt2 <- delta_df_prediction_plot(
   apply_qc = TRUE,
   predictions = predictions)
 
-plt1 + plt2 
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),        
+       plot = diagnositc_plt) 
 
 
 plt <- delta_df_publication_plot(

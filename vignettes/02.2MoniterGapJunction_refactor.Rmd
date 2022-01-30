@@ -638,12 +638,24 @@ mk_fm_plotting_df <- function(df = temp_2,
   Time = seq(0, max(df$Time, na.rm = TRUE), by  = 1), 
   Condition = unique(df$Condition) 
   ))
-
-  fm_line <- cbind(fm_line, predict(fm, newdata = fm_line, se.fit = TRUE))
+  # remove any time in a condition beyond what we have observations for.
+  for(condition in unique(df$Condition)){
+    max_time <- max(df[df$Condition == condition, 'Time'], na.rm = T)
+    
+    mask <- ((fm_line$Condition != condition) | (
+              (fm_line$Condition == condition) & (fm_line$Time <= max_time))
+             )
+    fm_line <- fm_line[mask, ]
+  }
+  
+  fm_line$Prediction <- predict(fm, newdata = fm_line)
+  # fm_line <- cbind(fm_line, predict(fm, newdata = fm_line))#, se.fit = TRUE))
   # SE is only provided once, apply to rest of data.
-  fm_line_se <- fm_line[!is.na(fm_line$SE), c('Time', 'SE')]
-  fm_line <- fm_line %>% dplyr::select(-SE)
-  fm_line <- full_join(fm_line, fm_line_se)
+  if("SE" %in% names(fm_line)){
+    fm_line_se <- fm_line[!is.na(fm_line$SE), c('Time', 'SE')]
+    fm_line <- fm_line %>% dplyr::select(-SE)
+    fm_line <- full_join(fm_line, fm_line_se)
+  }
   return(fm_line)
 }
 
@@ -660,15 +672,15 @@ delta_df_prediction_plot <- function(
     df <- df[!df$remove,]  
   }
   # sem lower and upper
-  predictions['SEML'] <-   predictions['Prediction'] - predictions['SE']
-  predictions['SEMU'] <-   predictions['Prediction'] + predictions['SE']  
+  # predictions['SEML'] <-   predictions['Prediction'] - predictions['SE']
+  # predictions['SEMU'] <-   predictions['Prediction'] + predictions['SE']  
   
   ### Does the fit look reasonable?
   plt <- df %>% 
     ggplot(aes(Time))+ #, color = remove))+
     geom_hline(yintercept = 0)+
-    geom_ribbon(data = predictions, aes(ymin=SEML, ymax=SEMU), 
-                fill = "gray", color = "black", alpha = 1)+
+    # geom_ribbon(data = predictions, aes(ymin=SEML, ymax=SEMU), 
+    #             fill = "gray", color = "black", alpha = 1)+
     geom_point(aes(y=gj))+
     geom_line(aes(y=gj, group = interaction(Experiment, Inj_Cell)))+
     geom_line(data = predictions, aes(y = Prediction), color = 'red', size = 1)+
@@ -709,8 +721,8 @@ delta_df_publication_plot <- function(
     df <- df[!df$remove,]  
   }
   # sem lower and upper
-  predictions['SEML'] <-   predictions['Prediction'] - predictions['SE']
-  predictions['SEMU'] <-   predictions['Prediction'] + predictions['SE']  
+  # predictions['SEML'] <-   predictions['Prediction'] - predictions['SE']
+  # predictions['SEMU'] <-   predictions['Prediction'] + predictions['SE']  
   
   
   # keep line form extending past data
@@ -750,10 +762,10 @@ delta_df_publication_plot <- function(
     
     geom_line(data = predictions, aes(y = Prediction), 
             color = 'firebrick', size = 1, alpha = 0.5)+
-    geom_line(data = predictions, aes(y = SEML), 
-            color = 'firebrick', size = 1, alpha = 0.5, linetype = 'dashed')+
-    geom_line(data = predictions, aes(y = SEMU), 
-            color = 'firebrick', size = 1, alpha = 0.5, linetype = 'dashed')+
+    # geom_line(data = predictions, aes(y = SEML), 
+    #         color = 'firebrick', size = 1, alpha = 0.5, linetype = 'dashed')+
+    # geom_line(data = predictions, aes(y = SEMU), 
+    #         color = 'firebrick', size = 1, alpha = 0.5, linetype = 'dashed')+
   
     
     # geom_ribbon(data = summary_stats, aes(ymin=med_do, ymax=med_up),   # median
@@ -1540,10 +1552,7 @@ write_out_fm_res(
   fm_reduced = fm_reduced,
   save_suffix = savename)
 
-# FIXME In sqrt(diag(varMat)) : NaNs produced
-
 predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
-
 
 plt2 <- delta_df_prediction_plot(
   df = temp_2,
@@ -1579,8 +1588,33 @@ ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(),
 ```
 
 # Delta r11 Statistics 
+
+We already have a measure for resistance. We should use that. However if we must use rin we should use a linear model to get around failures to converge.
+
+```
+mk_linear_model <- function(
+  df = temp_2,
+  apply_qc = TRUE
+){
+  if(apply_qc){
+    fm <- lm(gj ~ Time*Condition, data = df[!df$remove,])
+  } else {
+    fm <- lm(gj ~ Time*Condition, data = df)
+  }
+  return(fm)
+}
+
+fm <- mk_linear_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+car::Anova(fm)
+hsd_res <- agricolae::HSD.test(fm, trt = "Condition")
+```
+
 ## TEA
-```{r}
+```{r eval=FALSE}
 YLAB_EXPRESSION = expression(paste(Delta, "r11"))
 
 
@@ -1677,7 +1711,7 @@ ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(),
 
 
 ## High Amplitude
-```{r}
+```{r eval=FALSE}
 savename = "r11_HighAmpCd"
 threshold_change = 100.07    # 
 threshold_change_res = 0.95  # <- max groupwise collapsed iqr
@@ -1768,7 +1802,7 @@ ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(),
 
 ## standardized
 
-```{r}
+```{r eval=FALSE}
 savename = "r11_Standardized"
 threshold_change = 100.07    # 
 threshold_change_res = 1.51  # <- max groupwise collapsed iqr

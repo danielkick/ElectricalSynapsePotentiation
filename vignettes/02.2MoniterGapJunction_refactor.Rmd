@@ -624,9 +624,20 @@ write_out_fm_res <- function(fm = fm,
   res <- mk_tables(fm, fm_reduced)
   main_effect <- res[[1]]
   compare_d <- res[[2]]
+  compare_d <- data.frame(compare_d)
+  compare_d$holm <- p.adjust(compare_d[, 'p.value'], method = 'holm')
+  
   write.csv(main_effect, file = paste0("./a_reg_main_", save_suffix, ".csv"))
   write.csv(compare_d,   file = paste0("./a_reg_d_",    save_suffix, ".csv"))
   return(list(main_effect, compare_d))
+}
+
+
+write_out_fm_summary <- function(fm = fm,
+                                 save_suffix = ""){
+  sink(paste0("./a_reg_summary_", save_suffix, ".txt"))
+  print(summary(fm))
+  sink()
 }
 
 
@@ -849,6 +860,8 @@ write_out_fm_res(
   fm_reduced = fm_reduced,
   save_suffix = savename)
 
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
 
 predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
 
@@ -928,6 +941,9 @@ write_out_fm_res(
   fm_reduced = fm_reduced,
   save_suffix = savename)
 
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
+
 predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
 
 plt2 <- delta_df_prediction_plot(
@@ -999,6 +1015,9 @@ write_out_fm_res(
   fm = fm, 
   fm_reduced = fm_reduced,
   save_suffix = savename)
+
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
 
 predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
 
@@ -1093,6 +1112,8 @@ write_out_fm_res(
   fm_reduced = fm_reduced,
   save_suffix = savename)
 
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
 
 predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
 
@@ -1184,6 +1205,8 @@ write_out_fm_res(
   fm_reduced = fm_reduced,
   save_suffix = savename)
 
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
 
 predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
 
@@ -1274,6 +1297,9 @@ write_out_fm_res(
   fm = fm, 
   fm_reduced = fm_reduced,
   save_suffix = savename)
+
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
 
 # FIXME In sqrt(diag(varMat)) : NaNs produced
 predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
@@ -1370,6 +1396,8 @@ write_out_fm_res(
   fm_reduced = fm_reduced,
   save_suffix = savename)
 
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
 
 predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
 
@@ -1398,7 +1426,7 @@ plt <- delta_df_publication_plot(
 )
 
 
-plt+coord_cartesian(ylim = c(-1.5, 2.5))
+plt#+coord_cartesian(ylim = c(-1.5, 2.5))
 
 
 ggsave(here("data", "figures", paste0(savename, ".pdf")), plot = last_plot(), 
@@ -1461,6 +1489,8 @@ write_out_fm_res(
   fm_reduced = fm_reduced,
   save_suffix = savename)
 
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
 
 predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
 
@@ -1551,6 +1581,9 @@ write_out_fm_res(
   fm = fm, 
   fm_reduced = fm_reduced,
   save_suffix = savename)
+
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
 
 predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
 
@@ -1672,6 +1705,8 @@ write_out_fm_res(
   fm_reduced = fm_reduced,
   save_suffix = savename)
 
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
 
 predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
 
@@ -1763,6 +1798,8 @@ write_out_fm_res(
   fm_reduced = fm_reduced,
   save_suffix = savename)
 
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
 
 predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
 
@@ -1856,6 +1893,8 @@ write_out_fm_res(
   fm_reduced = fm_reduced,
   save_suffix = savename)
 
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
 
 predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
 

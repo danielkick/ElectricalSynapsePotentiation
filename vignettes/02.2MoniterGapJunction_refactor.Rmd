@@ -492,7 +492,8 @@ if(nrow(flag_after >= 1)){
    mask <- (temp_2$Condition == unlist(flag_after[i, "Condition" ])
        ) & (temp_2$Experiment == unlist(flag_after[i, "Experiment" ])
        ) & (temp_2$Inj_Cell == unlist(flag_after[i, "Inj_Cell" ])
-       ) & (temp_2$Time >= unlist(flag_after[i, "Time"]))
+       ) & (temp_2$Time >= unlist(flag_after[i, "Time"])             #  < --------------test for djs
+            )
   
     temp_2[mask, "remove"] <- TRUE 
   }
@@ -571,6 +572,30 @@ mk_asymptotic_model <- function(
           fct = AR.2(),
           pmodels = list(~factor(Condition), 
                          ~1))
+  }
+  return(fm)
+}
+
+
+## Full model with two conditional parameters
+mk_asymptotic_model_2 <- function(
+  df = temp_2,
+  apply_qc = TRUE
+){
+  if(apply_qc){
+    # fit model with condition affecting intercept but not time constant
+    fm <- drm(gj ~ Time, Condition,
+            data = df[!df$remove,],
+            fct = AR.2(),
+            pmodels = list(~factor(Condition), 
+                           ~factor(Condition)))
+  } else {
+    # This is expected to fail in some cases. Not intended to be used.
+    fm <- drm(gj ~ Time, Condition,
+          data = df,
+          fct = AR.2(),
+          pmodels = list(~factor(Condition), 
+                         ~factor(Condition)))
   }
   return(fm)
 }
@@ -825,7 +850,7 @@ delta_df_publication_plot <- function(
 # Delta GJ Statistics
 ## TEA
 ```{r}
-savename = "TEAMimic"
+savename = "gj_TEAMimic"
 
 temp_2 <- mk_annotated_delta_df(
   all.data = all.data,
@@ -905,13 +930,96 @@ ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(),
 
 ## ha (actual)
 ```{r}
-savename = "HighAmpCd"
+savename = "gj_HighAmpCd"
 
 temp_2 <- mk_annotated_delta_df(
   all.data = all.data,
   threshold_change = 100.07,     # 
   threshold_change_res = 1.23, # <- max groupwise collapsed iqr
   ith_condition = c("PS.90.HA", "PS.90.HA.Cd")
+)
+
+
+
+
+# for selecting a reasonable cutoff for threshold change residual
+get_grouped_iqrs(df = temp_2)
+
+get_grouped_iqrs_collapse_to_time(df = temp_2)
+
+plt1 <- annotated_delta_df_diagnostic(df = temp_2,
+                                      threshold_change_res = 1.5)
+
+fm_test <- mk_asymptotic_model_2(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+
+fm <- mk_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+
+fm_reduced <- mk_reduced_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+write_out_fm_res(
+  fm = fm, 
+  fm_reduced = fm_reduced,
+  save_suffix = savename)
+
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
+
+predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
+
+plt2 <- delta_df_prediction_plot(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions)
+
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
+       plot = diagnositc_plt) 
+
+
+plt <- delta_df_publication_plot(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions,
+  text.size = 20,
+  point.size = 2,
+  line.size = 3,
+  mean.point.size = 2,
+  mean.line.size = 2,
+  ylab_expression = expression(paste(Delta, "gj"^-1, " in M", Omega))
+  
+)
+
+plt
+
+
+ggsave(here("data", "figures", paste0(savename, ".pdf")), plot = last_plot(), 
+       width = 7.14, height = 5.81, units = "in")
+       # width = 10.68, height = 5.81, units = "in")
+ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(), 
+       width = 7.14, height = 5.81, units = "in")
+       # width = 10.68, height = 5.81, units = "in")
+```
+
+## TEA High Amplitude
+```{r}
+savename = "gj_TEAHighAmp"
+
+temp_2 <- mk_annotated_delta_df(
+  all.data = all.data,
+  threshold_change = 100.07,     # 
+  threshold_change_res = 1.23, # <- max groupwise collapsed iqr
+  ith_condition = c("PS.22.High.Amp", "PS.90.HA")
 )
 
 
@@ -983,7 +1091,7 @@ ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(),
 ## standardized
 
 ```{r}
-savename = "Standardized"
+savename = "gj_Standardized"
 
 temp_2 <- mk_annotated_delta_df(
   all.data = all.data,
@@ -1244,6 +1352,101 @@ ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(),
        width = width, height = height, units = "in")
 ```
 
+
+## TEA High Amplitude
+```{r}
+savename = "cc_TEAHighAmp"
+threshold_change = 100.07    # 
+threshold_change_res = 0.24  # <- max groupwise collapsed iqr
+ith_condition = c("PS.22.High.Amp", "PS.90.HA")
+ylab_expression = YLAB_EXPRESSION
+width = 7.14
+height = 5.81
+
+# overwrite 'gj' with desired parameter
+all.data_alias_gj <- all.data
+all.data_alias_gj <- all.data_alias_gj %>% 
+  mutate(gj = cc)  # <------------------------------------------------------ !!!
+
+# Boilerplate ------------------------------------------------------------------
+temp_2 <- mk_annotated_delta_df(
+  all.data = all.data_alias_gj,
+  threshold_change = threshold_change,     # 
+  threshold_change_res = threshold_change_res, # <- max groupwise collapsed iqr
+  ith_condition = ith_condition
+)
+
+# for selecting a reasonable cutoff for threshold change residual
+get_grouped_iqrs(df = temp_2)
+
+largest_timewise_iqr <- get_grouped_iqrs_collapse_to_time(df = temp_2)
+largest_timewise_iqr
+print("-- -- -- -- -- -- -- -- ")
+print(as.character(max(largest_timewise_iqr$max_iqr)))
+print("-- -- -- -- -- -- -- -- ")
+
+
+plt1 <- annotated_delta_df_diagnostic(df = temp_2,
+                                      threshold_change_res = threshold_change_res)
+
+
+fm <- mk_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+
+fm_reduced <- mk_reduced_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+write_out_fm_res(
+  fm = fm, 
+  fm_reduced = fm_reduced,
+  save_suffix = savename)
+
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
+
+predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
+
+
+plt2 <- delta_df_prediction_plot(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions)
+
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
+       plot = diagnositc_plt) 
+
+
+plt <- delta_df_publication_plot(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions,
+  text.size = 20,
+  point.size = 2,
+  line.size = 3,
+  mean.point.size = 2,
+  mean.line.size = 2,
+  ylab_expression = ylab_expression
+  
+)
+
+
+plt
+
+
+ggsave(here("data", "figures", paste0(savename, ".pdf")), plot = last_plot(), 
+       width = width, height = height, units = "in")
+ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(), 
+       width = width, height = height, units = "in")
+```
+
+
+
 ## standardized
 
 ```{r}
@@ -1442,6 +1645,98 @@ savename = "r1_HighAmpCd"
 threshold_change = 100.07    # 
 threshold_change_res = 1.67  # <- max groupwise collapsed iqr
 ith_condition = c("PS.90.HA", "PS.90.HA.Cd")
+ylab_expression = YLAB_EXPRESSION
+width = 7.14
+height = 5.81
+
+# overwrite 'gj' with desired parameter
+all.data_alias_gj <- all.data
+all.data_alias_gj <- all.data_alias_gj %>% 
+  mutate(gj = r1)  # <------------------------------------------------------ !!!
+
+# Boilerplate ------------------------------------------------------------------
+temp_2 <- mk_annotated_delta_df(
+  all.data = all.data_alias_gj,
+  threshold_change = threshold_change,     # 
+  threshold_change_res = threshold_change_res, # <- max groupwise collapsed iqr
+  ith_condition = ith_condition
+)
+
+# for selecting a reasonable cutoff for threshold change residual
+get_grouped_iqrs(df = temp_2)
+
+largest_timewise_iqr <- get_grouped_iqrs_collapse_to_time(df = temp_2)
+largest_timewise_iqr
+print("-- -- -- -- -- -- -- -- ")
+print(as.character(max(largest_timewise_iqr$max_iqr)))
+print("-- -- -- -- -- -- -- -- ")
+
+
+plt1 <- annotated_delta_df_diagnostic(df = temp_2,
+                                      threshold_change_res = threshold_change_res)
+
+
+fm <- mk_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+
+fm_reduced <- mk_reduced_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+write_out_fm_res(
+  fm = fm, 
+  fm_reduced = fm_reduced,
+  save_suffix = savename)
+
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
+
+predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
+
+
+plt2 <- delta_df_prediction_plot(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions)
+
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
+       plot = diagnositc_plt) 
+
+
+plt <- delta_df_publication_plot(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions,
+  text.size = 20,
+  point.size = 2,
+  line.size = 3,
+  mean.point.size = 2,
+  mean.line.size = 2,
+  ylab_expression = ylab_expression
+  
+)
+
+
+plt
+
+
+ggsave(here("data", "figures", paste0(savename, ".pdf")), plot = last_plot(), 
+       width = width, height = height, units = "in")
+ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(), 
+       width = width, height = height, units = "in")
+```
+
+## TEA High Amplitude
+```{r}
+savename = "r1_TEAHighAmp"
+threshold_change = 100.07    # 
+threshold_change_res = 1.67  # <- max groupwise collapsed iqr
+ith_condition = c("PS.22.High.Amp", "PS.90.HA")
 ylab_expression = YLAB_EXPRESSION
 width = 7.14
 height = 5.81

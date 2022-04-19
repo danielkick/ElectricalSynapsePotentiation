@@ -190,6 +190,9 @@ for( dept.var in dept.vars){
 # Reduce data to target times ----
 # all.data <- all.data[all.data$Time %in% c(0, 20, 40, 60), ]
 
+all.data <- all.data[all.data$Time <= 60, ]
+
+
 ```
 
 ### Calculate deltas and percent changes
@@ -272,9 +275,9 @@ M.clean$Condition <- factor(M.clean$Condition, levels = c("PS.0.High.Amp", "PS.2
 
 ### Params ####
 text.size = 20
-point.size = 3
+point.size = 2.5
 line.size = 3
-mean.point.size = 3
+mean.point.size = 2.5
 mean.line.size = 3
 
 ### High Amplitude Plots ####
@@ -735,9 +738,9 @@ delta_df_publication_plot <- function(
   apply_qc = TRUE,
   predictions = predictions,
   text.size = 20,
-  point.size = 2,
+  point.size = 2.5,
   line.size = 3,
-  mean.point.size = 2,
+  mean.point.size = 2.5,
   mean.line.size = 2,
   ylab_expression = expression(paste(Delta, "gj"^-1, " in M", Omega))
 ){
@@ -746,9 +749,9 @@ delta_df_publication_plot <- function(
   # predictions = predictions
   # 
   # text.size = 20
-  # point.size = 2
+  # point.size = 2.5
   # line.size = 3
-  # mean.point.size = 2
+  # mean.point.size = 2.5
   # mean.line.size = 2
   # ylab_expression = expression(paste(Delta, "gj"^-1, " in M", Omega))
   
@@ -814,7 +817,10 @@ delta_df_publication_plot <- function(
     # geom_line(aes(y=gj, group = interaction(Experiment, Inj_Cell)))+
     lemon::geom_pointline(aes(y=gj, group = interaction(Experiment, Inj_Cell)),
                           color = "cornflowerblue", size = point.size, 
-                          linesize = line.size, alpha = 0.5)+
+                          linesize = line.size, alpha = 0.5, shape =1)+
+    geom_point(aes(y=gj, group = interaction(Experiment, Inj_Cell)),
+                          color = "black", size = point.size, 
+                          alpha = 0.5, shape =1)+
     
     # geom_point(data = summary_stats, aes(x = Time, y = mean), 
     #            color = "white", size = mean.point.size, alpha = 0.3)+
@@ -906,9 +912,9 @@ plt <- delta_df_publication_plot(
   apply_qc = TRUE,
   predictions = predictions,
   text.size = 20,
-  point.size = 2,
+  point.size = 2.5,
   line.size = 3,
-  mean.point.size = 2,
+  mean.point.size = 2.5,
   mean.line.size = 2,
   ylab_expression = expression(paste(Delta, "gj"^-1, " in M", Omega))
   
@@ -992,9 +998,9 @@ plt <- delta_df_publication_plot(
   apply_qc = TRUE,
   predictions = predictions,
   text.size = 20,
-  point.size = 2,
+  point.size = 2.5,
   line.size = 3,
-  mean.point.size = 2,
+  mean.point.size = 2.5,
   mean.line.size = 2,
   ylab_expression = expression(paste(Delta, "gj"^-1, " in M", Omega))
   
@@ -1075,9 +1081,9 @@ plt <- delta_df_publication_plot(
   apply_qc = TRUE,
   predictions = predictions,
   text.size = 20,
-  point.size = 2,
+  point.size = 2.5,
   line.size = 3,
-  mean.point.size = 2,
+  mean.point.size = 2.5,
   mean.line.size = 2,
   ylab_expression = expression(paste(Delta, "gj"^-1, " in M", Omega))
   
@@ -1115,6 +1121,334 @@ ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(),
        # width = 10.68, height = 5.81, units = "in")
 ```
 
+## TEA+ha (TEST 4/16/2022)
+```{r}
+## What if we present all the high amp related treatmets together?
+
+
+savename = "gj_TEA_and_Depol_v1"
+
+temp_2 <- mk_annotated_delta_df(
+  all.data = all.data,
+  threshold_change = 100.07,     # 
+  threshold_change_res = 1.63, # <- max groupwise collapsed iqr
+  ith_condition = c("PS.0.High.Amp",  "PS.22.High.Amp", 
+                    "PS.90.HA", "PS.90.HA.Cd")
+)
+
+
+
+
+# for selecting a reasonable cutoff for threshold change residual
+get_grouped_iqrs(df = temp_2)
+
+get_grouped_iqrs_collapse_to_time(df = temp_2)
+
+plt1 <- annotated_delta_df_diagnostic(df = temp_2,
+                                      threshold_change_res = 1.5)
+
+
+# fm_test <- mk_asymptotic_model_2(
+#   df = temp_2,
+#   apply_qc = TRUE
+# )
+# Error in optim(startVec, opfct, hessian = TRUE, method = optMethod, control = list(maxit = maxIt,  : 
+#   non-finite finite-difference value [5]
+
+
+fm <- mk_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+
+fm_reduced <- mk_reduced_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+write_out_fm_res(
+  fm = fm, 
+  fm_reduced = fm_reduced,
+  save_suffix = savename)
+
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
+
+predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
+
+plt2 <- delta_df_prediction_plot(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions)
+
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
+       plot = diagnositc_plt) 
+
+
+plt <- delta_df_publication_plot(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions,
+  text.size = 20,
+  point.size = 2.5,
+  line.size = 3,
+  mean.point.size = 2.5,
+  mean.line.size = 2,
+  ylab_expression = expression(paste(Delta, "gj"^-1, " in M", Omega))
+  
+)
+
+plt
+
+
+ggsave(here("data", "figures", paste0(savename, ".pdf")), plot = last_plot(), 
+       width = 7.14, height = 5.81, units = "in")
+       # width = 10.68, height = 5.81, units = "in")
+ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(), 
+       width = 7.14, height = 5.81, units = "in")
+       # width = 10.68, height = 5.81, units = "in")
+```
+
+
+```{r}
+savename = "gj_TEA_and_Depol_v2"
+
+temp_2 <- mk_annotated_delta_df(
+  all.data = all.data,
+  threshold_change = 100.07,     # 
+  threshold_change_res = 1.63, # <- max groupwise collapsed iqr
+  ith_condition = c("PS.0.High.Amp",  "PS.22.High.Amp", 
+                    "PS.90.HA", "PS.90.HA.Cd")
+)
+
+
+
+
+# for selecting a reasonable cutoff for threshold change residual
+get_grouped_iqrs(df = temp_2)
+
+get_grouped_iqrs_collapse_to_time(df = temp_2)
+
+plt1 <- annotated_delta_df_diagnostic(df = temp_2,
+                                      threshold_change_res = 1.5)
+
+
+## Here's a heuristic complement to 
+purrr::map(unique(temp_2$Condition), function(ith_c){
+  mod <- summary(lm(gj ~ Time, temp_2[temp_2$Condition == ith_c, ]))
+  print(ith_c)
+  return(mod$coefficients[, 1])
+  })
+# [1] "PS.0.High.Amp"
+#  (Intercept)         Time 
+# -0.246977196  0.000520327 
+
+# [1] "PS.22.High.Amp"
+# (Intercept)        Time 
+# -0.33295567 -0.01412646 
+
+# [1] "PS.90.HA"
+# (Intercept)        Time 
+# -0.36792749 -0.01454095 
+
+# [1] "PS.90.HA.Cd"
+#  (Intercept)         Time 
+# -0.112643995 -0.001528569 
+
+## try with split time constant --
+df = temp_2
+apply_qc = TRUE
+df <- df %>% mutate(Condition_tau = case_when(
+  Condition == "PS.0.High.Amp" ~  "b",
+  Condition == "PS.22.High.Amp" ~ "a",
+  Condition == "PS.90.HA" ~       "a",
+  Condition == "PS.90.HA.Cd" ~    "b"
+  # abba pass
+  # abbc fail
+  # abca
+  )
+)
+
+
+if(apply_qc){
+  # fit model with condition affecting intercept but not time constant
+  fm <- drm(gj ~ Time, Condition,
+          data = df[!df$remove,],
+          fct = AR.2(),
+          pmodels = list(~factor(Condition),
+                         ~factor(Condition_tau)))
+} 
+
+
+if(apply_qc){
+  # fit model with condition affecting intercept but not time constant
+  fm_reduced <- drm(gj ~ Time, Condition,
+          data = df[!df$remove,],
+          fct = AR.2(),
+          pmodels = list(~factor(Condition),
+                         ~factor(Condition_tau)))
+} 
+
+## --
+
+
+# fm_test <- mk_asymptotic_model_2(
+#   df = temp_2,
+#   apply_qc = TRUE
+# )
+# Error in optim(startVec, opfct, hessian = TRUE, method = optMethod, control = list(maxit = maxIt,  : 
+#   non-finite finite-difference value [5]
+
+
+# fm <- mk_asymptotic_model(
+#   df = temp_2,
+#   apply_qc = TRUE
+# )
+# 
+# 
+# fm_reduced <- mk_reduced_asymptotic_model(
+#   df = temp_2,
+#   apply_qc = TRUE
+# )
+
+write_out_fm_res(
+  fm = fm, 
+  fm_reduced = fm_reduced,
+  save_suffix = savename)
+
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
+
+predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
+
+plt2 <- delta_df_prediction_plot(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions)
+
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
+       plot = diagnositc_plt) 
+
+
+plt <- delta_df_publication_plot(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions,
+  text.size = 20,
+  point.size = 2.5,
+  line.size = 3,
+  mean.point.size = 2.5,
+  mean.line.size = 2,
+  ylab_expression = expression(paste(Delta, "gj"^-1, " in M", Omega))
+  
+)
+
+plt
+
+
+ggsave(here("data", "figures", paste0(savename, ".pdf")), plot = last_plot(), 
+       width = 7.14, height = 5.81, units = "in")
+       # width = 10.68, height = 5.81, units = "in")
+ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(), 
+       width = 7.14, height = 5.81, units = "in")
+       # width = 10.68, height = 5.81, units = "in")
+```
+
+## one off test all 
+```{r}
+## What if we present all the high amp related treatmets together?
+savename = "gj_ALL"
+
+temp_2 <- mk_annotated_delta_df(
+  all.data = all.data,
+  threshold_change = 100.07,     # 
+  threshold_change_res = 1.63, # <- max groupwise collapsed iqr
+  ith_condition = c("PS.0", #"PS.22", "PS.45", "PS.90", 
+                    "PS.0.High.Amp",  #"PS.22.High.Amp", 
+                    #"PS.90.HA", 
+                    "PS.90.HA.Cd")
+)
+
+
+
+
+# for selecting a reasonable cutoff for threshold change residual
+get_grouped_iqrs(df = temp_2)
+
+get_grouped_iqrs_collapse_to_time(df = temp_2)
+
+plt1 <- annotated_delta_df_diagnostic(df = temp_2,
+                                      threshold_change_res = 1.5)
+
+
+# fm_test <- mk_asymptotic_model_2(
+#   df = temp_2,
+#   apply_qc = TRUE
+# )
+# Error in optim(startVec, opfct, hessian = TRUE, method = optMethod, control = list(maxit = maxIt,  : 
+#   non-finite finite-difference value [5]
+
+
+fm <- mk_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+
+fm_reduced <- mk_reduced_asymptotic_model(
+  df = temp_2,
+  apply_qc = TRUE
+)
+
+
+
+
+write_out_fm_res(
+  fm = fm, 
+  fm_reduced = fm_reduced,
+  save_suffix = savename)
+
+write_out_fm_summary(fm = fm,
+                     save_suffix = savename)
+
+predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
+
+plt2 <- delta_df_prediction_plot(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions)
+
+diagnositc_plt <- plt1 + plt2  
+ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
+       plot = diagnositc_plt) 
+
+
+plt <- delta_df_publication_plot(
+  df = temp_2,
+  apply_qc = TRUE,
+  predictions = predictions,
+  text.size = 20,
+  point.size = 2.5,
+  line.size = 3,
+  mean.point.size = 2.5,
+  mean.line.size = 2,
+  ylab_expression = expression(paste(Delta, "gj"^-1, " in M", Omega))
+  
+)
+
+plt
+
+
+ggsave(here("data", "figures", paste0(savename, ".pdf")), plot = last_plot(), 
+       width = 7.14, height = 5.81, units = "in")
+       # width = 10.68, height = 5.81, units = "in")
+ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(), 
+       width = 7.14, height = 5.81, units = "in")
+       # width = 10.68, height = 5.81, units = "in")
+```
 
 
 ## standardized
@@ -1172,9 +1506,9 @@ plt <- delta_df_publication_plot(
   apply_qc = TRUE,
   predictions = predictions,
   text.size = 20,
-  point.size = 2,
+  point.size = 2.5,
   line.size = 3,
-  mean.point.size = 2,
+  mean.point.size = 2.5,
   mean.line.size = 2,
   ylab_expression = expression(paste(Delta, "gj"^-1, " in M", Omega))
   
@@ -1270,9 +1604,9 @@ plt <- delta_df_publication_plot(
   apply_qc = TRUE,
   predictions = predictions,
   text.size = 20,
-  point.size = 2,
+  point.size = 2.5,
   line.size = 3,
-  mean.point.size = 2,
+  mean.point.size = 2.5,
   mean.line.size = 2,
   ylab_expression = ylab_expression
   
@@ -1363,9 +1697,9 @@ plt <- delta_df_publication_plot(
   apply_qc = TRUE,
   predictions = predictions,
   text.size = 20,
-  point.size = 2,
+  point.size = 2.5,
   line.size = 3,
-  mean.point.size = 2,
+  mean.point.size = 2.5,
   mean.line.size = 2,
   ylab_expression = ylab_expression
   
@@ -1456,9 +1790,9 @@ plt <- delta_df_publication_plot(
   apply_qc = TRUE,
   predictions = predictions,
   text.size = 20,
-  point.size = 2,
+  point.size = 2.5,
   line.size = 3,
-  mean.point.size = 2,
+  mean.point.size = 2.5,
   mean.line.size = 2,
   ylab_expression = ylab_expression
   
@@ -1552,9 +1886,9 @@ plt <- delta_df_publication_plot(
   apply_qc = TRUE,
   predictions = predictions,
   text.size = 20,
-  point.size = 2,
+  point.size = 2.5,
   line.size = 3,
-  mean.point.size = 2,
+  mean.point.size = 2.5,
   mean.line.size = 2,
   ylab_expression = ylab_expression
   
@@ -1649,9 +1983,9 @@ plt <- delta_df_publication_plot(
   apply_qc = TRUE,
   predictions = predictions,
   text.size = 20,
-  point.size = 2,
+  point.size = 2.5,
   line.size = 3,
-  mean.point.size = 2,
+  mean.point.size = 2.5,
   mean.line.size = 2,
   ylab_expression = ylab_expression
   
@@ -1742,9 +2076,9 @@ plt <- delta_df_publication_plot(
   apply_qc = TRUE,
   predictions = predictions,
   text.size = 20,
-  point.size = 2,
+  point.size = 2.5,
   line.size = 3,
-  mean.point.size = 2,
+  mean.point.size = 2.5,
   mean.line.size = 2,
   ylab_expression = ylab_expression
   
@@ -1834,9 +2168,9 @@ plt <- delta_df_publication_plot(
   apply_qc = TRUE,
   predictions = predictions,
   text.size = 20,
-  point.size = 2,
+  point.size = 2.5,
   line.size = 3,
-  mean.point.size = 2,
+  mean.point.size = 2.5,
   mean.line.size = 2,
   ylab_expression = ylab_expression
   
@@ -1926,9 +2260,9 @@ plt <- delta_df_publication_plot(
   apply_qc = TRUE,
   predictions = predictions,
   text.size = 20,
-  point.size = 2,
+  point.size = 2.5,
   line.size = 3,
-  mean.point.size = 2,
+  mean.point.size = 2.5,
   mean.line.size = 2,
   ylab_expression = ylab_expression
   
@@ -2050,9 +2384,9 @@ plt <- delta_df_publication_plot(
   apply_qc = TRUE,
   predictions = predictions,
   text.size = 20,
-  point.size = 2,
+  point.size = 2.5,
   line.size = 3,
-  mean.point.size = 2,
+  mean.point.size = 2.5,
   mean.line.size = 2,
   ylab_expression = ylab_expression
   
@@ -2143,9 +2477,9 @@ plt <- delta_df_publication_plot(
   apply_qc = TRUE,
   predictions = predictions,
   text.size = 20,
-  point.size = 2,
+  point.size = 2.5,
   line.size = 3,
-  mean.point.size = 2,
+  mean.point.size = 2.5,
   mean.line.size = 2,
   ylab_expression = ylab_expression
   
@@ -2238,9 +2572,9 @@ plt <- delta_df_publication_plot(
   apply_qc = TRUE,
   predictions = predictions,
   text.size = 20,
-  point.size = 2,
+  point.size = 2.5,
   line.size = 3,
-  mean.point.size = 2,
+  mean.point.size = 2.5,
   mean.line.size = 2,
   ylab_expression = ylab_expression
   

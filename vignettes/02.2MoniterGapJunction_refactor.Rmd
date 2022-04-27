@@ -866,6 +866,169 @@ delta_df_publication_plot <- function(
 ```
 
 
+
+
+
+```{r}
+# savename = "gj_ElevatedAmplitude"
+
+# temp_2 <- mk_annotated_delta_df(
+#   all.data = all.data,
+#   threshold_change = 100.07,     # 
+#   threshold_change_res = 1.63, # <- max groupwise collapsed iqr
+#   ith_condition = c("PS.0.High.Amp",  "PS.22.High.Amp", "PS.90.HA", "PS.90.HA.Cd")
+# )
+
+# --- OVERWRITE ----
+
+# just like mk_annotated_delta_df but it automatically sets an IQR threshold based on each treatment not experiment wide
+
+# mk_annotated_delta_df__groupwise_iqr
+mk_annotated_delta_df <- function(
+all.data = all.data,
+# what is the largest change in 20 minutes that we're willing to accept as real?
+# to be useful this might be something on the order of 1.5 but can be set high
+# to use only threshold change on the residual relative to the median.
+threshold_change = 21.4,
+# relative to the median.
+threshold_change_res = 1.5,
+ith_condition = c("PS.0", "PS.22", "PS.45", "PS.90")
+){
+# # inputs
+# all.data = all.data
+# threshold_change = 21.4  #1.5 #
+# threshold_change_res = 1.5
+# ith_condition = c("PS.0", "PS.22", "PS.45", "PS.90")
+  
+
+# all.data = all.data
+# threshold_change = 100.07
+# threshold_change_res = 1.63 # <- max groupwise collapsed iqr
+# ith_condition = c("PS.0.High.Amp",  "PS.22.High.Amp", "PS.90.HA", "PS.90.HA.Cd")
+
+
+## Calculate baseline, deltas ==================================================
+temp <- all.data %>% dplyr::select(Condition, Experiment, Inj_Cell, Time, gj)
+
+# Get baseline values so we can easily replace with deltas
+temp.t0 <- temp %>%
+  dplyr::filter(Time == 0) %>%
+  rename(initial = gj) %>%
+  dplyr::select(-Time)
+
+temp <- full_join(temp, temp.t0)
+temp$gj = temp$gj - temp$initial
+
+temp$Time <- as.numeric(temp$Time)
+
+# reduce down to target conditions
+temp_2 <- temp[temp$Condition %in% c(ith_condition), ]
+
+# Check if there's an 80 minute time point. calculate delta accordingly
+if (80 %in% unique(temp_2$Time) ){
+  # Get stepwise change
+  temp_2_diff = temp_2 %>% 
+    pivot_wider(names_from =  Time, values_from = gj) %>% 
+    mutate(delta00 = 0,
+           delta20 = `20`-`0`,
+           delta40 = `40`-`20`,
+           delta60 = `60`-`40`,
+           delta80 = `80`-`60`
+           ) %>% 
+    pivot_longer(c(delta00, delta20, delta40, delta60
+                   , delta80
+                   ), 
+                 names_to = "dTime", values_to = "diffgj") %>% 
+    dplyr::select(Condition, Experiment, Inj_Cell, dTime, diffgj) %>% 
+    mutate(Time = as.numeric(str_remove(dTime, "delta"))) %>% 
+    dplyr::select(-dTime)
+} else {
+  temp_2_diff = temp_2 %>% 
+    pivot_wider(names_from =  Time, values_from = gj) %>% 
+    mutate(delta00 = 0,
+           delta20 = `20`-`0`,
+           delta40 = `40`-`20`,
+           delta60 = `60`-`40`
+           ) %>% 
+    pivot_longer(c(delta00, delta20, delta40, delta60
+                   ), 
+                 names_to = "dTime", values_to = "diffgj") %>% 
+    dplyr::select(Condition, Experiment, Inj_Cell, dTime, diffgj) %>% 
+    mutate(Time = as.numeric(str_remove(dTime, "delta"))) %>% 
+    dplyr::select(-dTime)  
+}
+
+temp_2 = full_join(temp_2, temp_2_diff)
+
+
+## Calculate selection metrics =================================================
+# Try adding in residual from groupxtime change
+temp_2 <- temp_2 %>%
+  ungroup() %>%
+  group_by(Condition, Time) %>%
+  mutate(median_gj = median(gj, na.rm = T)) %>%
+  mutate(residual_gj = median_gj - gj) %>%
+  ungroup()
+
+temp_2["absdiffgj"] <- abs(temp_2$diffgj)
+temp_2["absresidgj"] <- abs(temp_2$residual_gj)
+
+
+
+temp_2_thresholds <- temp_2 %>% 
+    group_by(Condition, Time) %>% 
+    summarize(iqr = IQR(gj, na.rm = T)) %>% 
+    ungroup() %>% 
+    group_by(Condition) %>% 
+    summarize(
+      max_iqr  = max(iqr, na.rm = T) )  
+
+temp_2 <- temp_2 %>% 
+  full_join(temp_2_thresholds)
+
+
+
+## Flag all points after an offending observation ==============================
+temp_2["remove"] = FALSE
+temp_2 <- temp_2[!is.na(temp_2$gj), ]
+temp_2 <- temp_2[!is.na(temp_2$absdiffgj), ]
+temp_2[temp_2$absdiffgj > threshold_change, "remove"] = TRUE
+# and add in residual
+temp_2[temp_2$absresidgj > temp_2$max_iqr, "remove"] = TRUE # < ------------------------------------------
+
+temp_2$Condition <- as.character(temp_2$Condition)
+# flag everything after the first deviation
+# assume that if an experiment fails, every time point after it is not to be trusted.
+flag_after <- temp_2[temp_2$remove, ]
+if(nrow(flag_after >= 1)){
+  for(i in seq(1, nrow(flag_after))){
+   mask <- (temp_2$Condition == unlist(flag_after[i, "Condition" ])
+       ) & (temp_2$Experiment == unlist(flag_after[i, "Experiment" ])
+       ) & (temp_2$Inj_Cell == unlist(flag_after[i, "Inj_Cell" ])
+       ) & (temp_2$Time >= unlist(flag_after[i, "Time"])             #  < --------------test for djs
+            )
+  
+    temp_2[mask, "remove"] <- TRUE 
+  }
+}
+
+
+## =============================================================================
+
+return(temp_2)
+
+}
+
+
+# for selecting a reasonable cutoff for threshold change residual
+# get_grouped_iqrs(df = temp_2)
+# 
+# get_grouped_iqrs_collapse_to_time(df = temp_2)
+```
+
+
+
+
 # Delta GJ Statistics
 ## Elevated Amplitude
 ```{r}
@@ -873,10 +1036,23 @@ savename = "gj_ElevatedAmplitude"
 
 temp_2 <- mk_annotated_delta_df(
   all.data = all.data,
-  threshold_change = 100.07,     # 
+  threshold_change = 100.07,     #
   threshold_change_res = 1.63, # <- max groupwise collapsed iqr
   ith_condition = c("PS.0.High.Amp",  "PS.22.High.Amp", "PS.90.HA", "PS.90.HA.Cd")
 )
+
+
+# temp2 <- mk_annotated_delta_df__groupwise_iqr(
+#   all.data = all.data,
+#   threshold_change = 100.07,     #
+#   ith_condition = c("PS.0.High.Amp",  "PS.22.High.Amp", "PS.90.HA", "PS.90.HA.Cd")
+# )
+# temp_2 <- mk_annotated_delta_df(
+#   all.data = all.data,
+#   threshold_change = 100.07,     #
+#   threshold_change_res = 0.928, # <- max groupwise collapsed iqr
+#   ith_condition = c("PS.0.High.Amp",  "PS.22.High.Amp", "PS.90.HA", "PS.90.HA.Cd")
+# )
 
 
 # for selecting a reasonable cutoff for threshold change residual
@@ -887,25 +1063,7 @@ get_grouped_iqrs_collapse_to_time(df = temp_2)
 plt1 <- annotated_delta_df_diagnostic(df = temp_2,
                                       threshold_change_res = 1.5)
 
-df = temp_2
-df[df$Condition == "PS.90.HA.Cd", "Condition"] = "PS90HACd"
-df[df$Condition == "PS.90.HA", "Condition"] = "PS90HA"
-print("ANCOVA ON DELTAS ----- ")
-fm <- lm(gj ~ Time*Condition, df[!df$remove,])
-car::Anova(fm)
-print(agricolae::HSD.test(fm, trt = c("Condition"))$groups)
 
-print("ANOVA ON DELTAS ----- ")
-fm <- lm(gj ~ Condition, df[(!df$remove)&(df$Time == 60),])
-car::Anova(fm)
-print(agricolae::HSD.test(fm, trt = c("Condition"))$groups)
-
-print("KW ON DELTAS ----- ")
-kruskal.test(gj ~ Condition, df[(!df$remove)&(df$Time == 60),] )
-dunn.test::dunn.test(
-  unlist(df[(!df$remove)&(df$Time == 60), "gj"]),
-  unlist(df[(!df$remove)&(df$Time == 60), "Condition"]),
-  method = "holm")
 df = temp_2
 
 fm <- mk_asymptotic_model(
@@ -971,96 +1129,6 @@ ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(),
 ```
 
 
-## TEA+ha (TEST 4/16/2022)
-```{r}
-# ## What if we present all the high amp related treatmets together?
-# 
-# 
-# savename = "gj_TEA_and_Depol_v1"
-# 
-# temp_2 <- mk_annotated_delta_df(
-#   all.data = all.data,
-#   threshold_change = 100.07,     # 
-#   threshold_change_res = 1.63, # <- max groupwise collapsed iqr
-#   ith_condition = c("PS.0.High.Amp",  "PS.22.High.Amp", 
-#                     "PS.90.HA", "PS.90.HA.Cd")
-# )
-# 
-# 
-# 
-# 
-# # for selecting a reasonable cutoff for threshold change residual
-# get_grouped_iqrs(df = temp_2)
-# 
-# get_grouped_iqrs_collapse_to_time(df = temp_2)
-# 
-# plt1 <- annotated_delta_df_diagnostic(df = temp_2,
-#                                       threshold_change_res = 1.5)
-# 
-# 
-# # fm_test <- mk_asymptotic_model_2(
-# #   df = temp_2,
-# #   apply_qc = TRUE
-# # )
-# # Error in optim(startVec, opfct, hessian = TRUE, method = optMethod, control = list(maxit = maxIt,  : 
-# #   non-finite finite-difference value [5]
-# 
-# 
-# fm <- mk_asymptotic_model(
-#   df = temp_2,
-#   apply_qc = TRUE
-# )
-# 
-# 
-# fm_reduced <- mk_reduced_asymptotic_model(
-#   df = temp_2,
-#   apply_qc = TRUE
-# )
-# 
-# write_out_fm_res(
-#   fm = fm, 
-#   fm_reduced = fm_reduced,
-#   save_suffix = savename)
-# 
-# write_out_fm_summary(fm = fm,
-#                      save_suffix = savename)
-# 
-# predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
-# 
-# plt2 <- delta_df_prediction_plot(
-#   df = temp_2,
-#   apply_qc = TRUE,
-#   predictions = predictions)
-# 
-# diagnositc_plt <- plt1 + plt2  
-# ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
-#        plot = diagnositc_plt) 
-# 
-# 
-# plt <- delta_df_publication_plot(
-#   df = temp_2,
-#   apply_qc = TRUE,
-#   predictions = predictions,
-#   text.size = 20,
-#   point.size = 2.5,
-#   line.size = 3,
-#   mean.point.size = 2.5,
-#   mean.line.size = 2,
-#   ylab_expression = expression(paste(Delta, "gj"^-1, " in M", Omega))
-#   
-# )
-# 
-# plt
-# 
-# 
-# ggsave(here("data", "figures", paste0(savename, ".pdf")), plot = last_plot(), 
-#        width = 7.14, height = 5.81, units = "in")
-#        # width = 10.68, height = 5.81, units = "in")
-# ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(), 
-#        width = 7.14, height = 5.81, units = "in")
-#        # width = 10.68, height = 5.81, units = "in")
-```
-
 
 ## standardized
 
@@ -1082,25 +1150,6 @@ get_grouped_iqrs_collapse_to_time(df = temp_2)
 plt1 <- annotated_delta_df_diagnostic(df = temp_2,
                                       threshold_change_res = 1.5)
 
-df = temp_2
-df[df$Condition == "PS.90.HA.Cd", "Condition"] = "PS90HACd"
-df[df$Condition == "PS.90.HA", "Condition"] = "PS90HA"
-print("ANCOVA ON DELTAS ----- ")
-fm <- lm(gj ~ Time*Condition, df[!df$remove,])
-car::Anova(fm)
-print(agricolae::HSD.test(fm, trt = c("Condition"))$groups)
-
-print("ANOVA ON DELTAS ----- ")
-fm <- lm(gj ~ Condition, df[(!df$remove)&(df$Time == 60),])
-car::Anova(fm)
-print(agricolae::HSD.test(fm, trt = c("Condition"))$groups)
-
-print("KW ON DELTAS ----- ")
-kruskal.test(gj ~ Condition, df[(!df$remove)&(df$Time == 60),] )
-dunn.test::dunn.test(
-  unlist(df[(!df$remove)&(df$Time == 60), "gj"]),
-  unlist(df[(!df$remove)&(df$Time == 60), "Condition"]),
-  method = "holm")
 
 df = temp_2
 fm <- mk_asymptotic_model(
@@ -1200,25 +1249,6 @@ print("-- -- -- -- -- -- -- -- ")
 plt1 <- annotated_delta_df_diagnostic(df = temp_2,
                                       threshold_change_res = threshold_change_res)
 
-df = temp_2
-df[df$Condition == "PS.90.HA.Cd", "Condition"] = "PS90HACd"
-df[df$Condition == "PS.90.HA", "Condition"] = "PS90HA"
-print("ANCOVA ON DELTAS ----- ")
-fm <- lm(gj ~ Time*Condition, df[!df$remove,])
-car::Anova(fm)
-print(agricolae::HSD.test(fm, trt = c("Condition"))$groups)
-
-print("ANOVA ON DELTAS ----- ")
-fm <- lm(gj ~ Condition, df[(!df$remove)&(df$Time == 60),])
-car::Anova(fm)
-print(agricolae::HSD.test(fm, trt = c("Condition"))$groups)
-
-print("KW ON DELTAS ----- ")
-kruskal.test(gj ~ Condition, df[(!df$remove)&(df$Time == 60),] )
-dunn.test::dunn.test(
-  unlist(df[(!df$remove)&(df$Time == 60), "gj"]),
-  unlist(df[(!df$remove)&(df$Time == 60), "Condition"]),
-  method = "holm")
 
 df = temp_2
 fm <- mk_asymptotic_model(
@@ -1315,25 +1345,7 @@ print("-- -- -- -- -- -- -- -- ")
 plt1 <- annotated_delta_df_diagnostic(df = temp_2,
                                       threshold_change_res = threshold_change_res)
 
-df = temp_2
-df[df$Condition == "PS.90.HA.Cd", "Condition"] = "PS90HACd"
-df[df$Condition == "PS.90.HA", "Condition"] = "PS90HA"
-print("ANCOVA ON DELTAS ----- ")
-fm <- lm(gj ~ Time*Condition, df[!df$remove,])
-car::Anova(fm)
-print(agricolae::HSD.test(fm, trt = c("Condition"))$groups)
 
-print("ANOVA ON DELTAS ----- ")
-fm <- lm(gj ~ Condition, df[(!df$remove)&(df$Time == 60),])
-car::Anova(fm)
-print(agricolae::HSD.test(fm, trt = c("Condition"))$groups)
-
-print("KW ON DELTAS ----- ")
-kruskal.test(gj ~ Condition, df[(!df$remove)&(df$Time == 60),] )
-dunn.test::dunn.test(
-  unlist(df[(!df$remove)&(df$Time == 60), "gj"]),
-  unlist(df[(!df$remove)&(df$Time == 60), "Condition"]),
-  method = "holm")
 
 df = temp_2
 fm <- mk_asymptotic_model(
@@ -1435,25 +1447,7 @@ print("-- -- -- -- -- -- -- -- ")
 plt1 <- annotated_delta_df_diagnostic(df = temp_2,
                                       threshold_change_res = threshold_change_res)
 
-df = temp_2
-df[df$Condition == "PS.90.HA.Cd", "Condition"] = "PS90HACd"
-df[df$Condition == "PS.90.HA", "Condition"] = "PS90HA"
-print("ANCOVA ON DELTAS ----- ")
-fm <- lm(gj ~ Time*Condition, df[!df$remove,])
-car::Anova(fm)
-print(agricolae::HSD.test(fm, trt = c("Condition"))$groups)
 
-print("ANOVA ON DELTAS ----- ")
-fm <- lm(gj ~ Condition, df[(!df$remove)&(df$Time == 60),])
-car::Anova(fm)
-print(agricolae::HSD.test(fm, trt = c("Condition"))$groups)
-
-print("KW ON DELTAS ----- ")
-kruskal.test(gj ~ Condition, df[(!df$remove)&(df$Time == 60),] )
-dunn.test::dunn.test(
-  unlist(df[(!df$remove)&(df$Time == 60), "gj"]),
-  unlist(df[(!df$remove)&(df$Time == 60), "Condition"]),
-  method = "holm")
 
 df = temp_2
 fm <- mk_asymptotic_model(
@@ -1552,25 +1546,6 @@ print("-- -- -- -- -- -- -- -- ")
 plt1 <- annotated_delta_df_diagnostic(df = temp_2,
                                       threshold_change_res = threshold_change_res)
 
-df = temp_2
-df[df$Condition == "PS.90.HA.Cd", "Condition"] = "PS90HACd"
-df[df$Condition == "PS.90.HA", "Condition"] = "PS90HA"
-print("ANCOVA ON DELTAS ----- ")
-fm <- lm(gj ~ Time*Condition, df[!df$remove,])
-car::Anova(fm)
-print(agricolae::HSD.test(fm, trt = c("Condition"))$groups)
-
-print("ANOVA ON DELTAS ----- ")
-fm <- lm(gj ~ Condition, df[(!df$remove)&(df$Time == 60),])
-car::Anova(fm)
-print(agricolae::HSD.test(fm, trt = c("Condition"))$groups)
-
-print("KW ON DELTAS ----- ")
-kruskal.test(gj ~ Condition, df[(!df$remove)&(df$Time == 60),] )
-dunn.test::dunn.test(
-  unlist(df[(!df$remove)&(df$Time == 60), "gj"]),
-  unlist(df[(!df$remove)&(df$Time == 60), "Condition"]),
-  method = "holm")
 
 df = temp_2
 fm <- mk_asymptotic_model(
@@ -1578,6 +1553,14 @@ fm <- mk_asymptotic_model(
   apply_qc = TRUE,
   robust_type = robust_type_choice
 )
+
+
+
+
+
+
+
+
 
 
 fm_reduced <- mk_reduced_asymptotic_model(
@@ -1627,231 +1610,14 @@ ggsave(here("data", "figures", paste0(savename, ".pdf")), plot = last_plot(),
        width = width, height = height, units = "in")
 ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(), 
        width = width, height = height, units = "in")
-```
 
-# Delta r11 Statistics 
 
-We already have a measure for resistance. We should use that. However if we must use rin we should use a linear model to get around failures to converge.
 
-```
-mk_linear_model <- function(
-  df = temp_2,
-  apply_qc = TRUE
-){
-  if(apply_qc){
-    fm <- lm(gj ~ Time*Condition, data = df[!df$remove,])
-  } else {
-    fm <- lm(gj ~ Time*Condition, data = df)
-  }
-  return(fm)
-}
 
-fm <- mk_linear_model(
-  df = temp_2,
-  apply_qc = TRUE
-)
 
+fm <- lm(gj ~ Time:Condition,
+         data = df[!df$remove,])
 car::Anova(fm)
-hsd_res <- agricolae::HSD.test(fm, trt = "Condition")
+print(agricolae::HSD.test(fm, trt = c('Condition')))
+
 ```
-
-## Elevated Amplitude
-```{r eval=FALSE}
-YLAB_EXPRESSION = expression(paste(Delta, "r11"))
-
-
-savename = "r11_ElevatedAmplitude"
-threshold_change = 100.07    # 
-threshold_change_res = 0.95 # <- max groupwise collapsed iqr
-ith_condition = c("PS.0.High.Amp",  "PS.22.High.Amp", "PS.90.HA", "PS.90.HA.Cd")
-ylab_expression = YLAB_EXPRESSION
-width = 7.14
-height = 5.81
-
-# overwrite 'gj' with desired parameter
-all.data_alias_gj <- all.data
-all.data_alias_gj <- all.data_alias_gj %>% 
-  mutate(gj = r11)  # <------------------------------------------------------ !!!
-
-# Boilerplate ------------------------------------------------------------------
-temp_2 <- mk_annotated_delta_df(
-  all.data = all.data_alias_gj,
-  threshold_change = threshold_change,     # 
-  threshold_change_res = threshold_change_res, # <- max groupwise collapsed iqr
-  ith_condition = ith_condition
-)
-
-# for selecting a reasonable cutoff for threshold change residual
-get_grouped_iqrs(df = temp_2)
-
-largest_timewise_iqr <- get_grouped_iqrs_collapse_to_time(df = temp_2)
-largest_timewise_iqr
-print("-- -- -- -- -- -- -- -- ")
-print(as.character(max(largest_timewise_iqr$max_iqr)))
-print("-- -- -- -- -- -- -- -- ")
-
-
-plt1 <- annotated_delta_df_diagnostic(df = temp_2,
-                                      threshold_change_res = threshold_change_res)
-
-
-# FIXME Error in optim(startVec, opfct, hessian = TRUE, method = optMethod, control = list(maxit = maxIt,  : 
-  # non-finite finite-difference value [3]
-
-fm <- mk_asymptotic_model(
-  df = temp_2,
-  apply_qc = TRUE,
-  robust_type = robust_type_choice
-)
-
-
-fm_reduced <- mk_reduced_asymptotic_model(
-  df = temp_2,
-  apply_qc = TRUE,
-  robust_type = robust_type_choice
-)
-
-write_out_fm_res(
-  fm = fm, 
-  fm_reduced = fm_reduced,
-  save_suffix = savename)
-
-write_out_fm_summary(fm = fm,
-                     save_suffix = savename)
-
-predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
-
-
-plt2 <- delta_df_prediction_plot(
-  df = temp_2,
-  apply_qc = TRUE,
-  predictions = predictions)
-
-diagnositc_plt <- plt1 + plt2  
-ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),         
-       plot = diagnositc_plt) 
-
-
-plt <- delta_df_publication_plot(
-  df = temp_2,
-  apply_qc = TRUE,
-  predictions = predictions,
-  text.size = 20,
-  point.size = 2.5,
-  line.size = 3,
-  mean.point.size = 2.5,
-  mean.line.size = 2,
-  ylab_expression = ylab_expression
-  
-)
-
-
-plt
-
-
-ggsave(here("data", "figures", paste0(savename, ".pdf")), plot = last_plot(), 
-       width = width, height = height, units = "in")
-ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(), 
-       width = width, height = height, units = "in")
-```
-
-
-
-## standardized
-
-```{r eval=FALSE}
-savename = "r11_Standardized"
-threshold_change = 100.07    # 
-threshold_change_res = 1.51  # <- max groupwise collapsed iqr
-ith_condition = c("PS.0", "PS.22", "PS.45", "PS.90")
-ylab_expression = YLAB_EXPRESSION
-width = 10.68
-height = 5.81
-
-# overwrite 'gj' with desired parameter
-all.data_alias_gj <- all.data
-all.data_alias_gj <- all.data_alias_gj %>% 
-  mutate(gj = r11)  # <------------------------------------------------------ !!!
-
-# Boilerplate ------------------------------------------------------------------
-temp_2 <- mk_annotated_delta_df(
-  all.data = all.data_alias_gj,
-  threshold_change = threshold_change,     # 
-  threshold_change_res = threshold_change_res, # <- max groupwise collapsed iqr
-  ith_condition = ith_condition
-)
-
-# for selecting a reasonable cutoff for threshold change residual
-get_grouped_iqrs(df = temp_2)
-
-largest_timewise_iqr <- get_grouped_iqrs_collapse_to_time(df = temp_2)
-largest_timewise_iqr
-print("-- -- -- -- -- -- -- -- ")
-print(as.character(max(largest_timewise_iqr$max_iqr)))
-print("-- -- -- -- -- -- -- -- ")
-
-
-plt1 <- annotated_delta_df_diagnostic(df = temp_2,
-                                      threshold_change_res = threshold_change_res)
-
-# FIXME Warning message:
-# In sqrt(diag(varMat)) : NaNs produced
-
-fm <- mk_asymptotic_model(
-  df = temp_2,
-  apply_qc = TRUE,
-  robust_type = robust_type_choice
-)
-
-
-fm_reduced <- mk_reduced_asymptotic_model(
-  df = temp_2,
-  apply_qc = TRUE,
-  robust_type = robust_type_choice
-)
-
-write_out_fm_res(
-  fm = fm, 
-  fm_reduced = fm_reduced,
-  save_suffix = savename)
-
-write_out_fm_summary(fm = fm,
-                     save_suffix = savename)
-
-predictions <- mk_fm_plotting_df(df = temp_2, fm = fm)
-
-
-plt2 <- delta_df_prediction_plot(
-  df = temp_2,
-  apply_qc = TRUE,
-  predictions = predictions)
-
-diagnositc_plt <- plt1 + plt2  
-ggsave(here("data", "figures", paste0(savename, '_diagnostic', ".pdf")),        
-       plot = diagnositc_plt) 
-
-
-plt <- delta_df_publication_plot(
-  df = temp_2,
-  apply_qc = TRUE,
-  predictions = predictions,
-  text.size = 20,
-  point.size = 2.5,
-  line.size = 3,
-  mean.point.size = 2.5,
-  mean.line.size = 2,
-  ylab_expression = ylab_expression
-  
-)
-
-
-plt
-
-
-ggsave(here("data", "figures", paste0(savename, ".pdf")), plot = last_plot(), 
-       width = width, height = height, units = "in")
-ggsave(here("data", "figures", paste0(savename, ".svg")), plot = last_plot(), 
-       width = width, height = height, units = "in")
-```
-
-
